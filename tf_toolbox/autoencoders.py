@@ -1,5 +1,5 @@
 from tensorflow.keras import Sequential
-from tensorflow.keras.layers import, Dense, GaussianNoise, BatchNormalization, Activation
+from tensorflow.keras.layers import Dense, GaussianNoise, BatchNormalization, Activation
 import numpy as np
 from datetime import datetime
 from tensorflow.keras.callbacks import TensorBoard
