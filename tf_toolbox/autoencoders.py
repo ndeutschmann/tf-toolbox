@@ -36,7 +36,6 @@ class DenseLayeredAutoencoder:
         self.model.add(BatchNormalization())
         self.encoder.add(self.model.layers[-1])
         self.model.add(Activation('sigmoid'))
-        self.encoder.add(self.model.layers[-1])
         self.decoder.add(self.model.layers[-1])
 
         # Decoding sequence
