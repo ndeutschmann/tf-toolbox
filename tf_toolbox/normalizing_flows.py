@@ -10,8 +10,8 @@ class AffineCoupling(keras.layers.Layer):
             NN_layers.append(
                 keras.layers.Dense(size,activation="relu")
             )
-        # Last layer is a SVM
-        NN_layers.append(keras.layers.Dense(sizes[-1]))
+        # Last layer will be exponentiated so tame it with a sigmoid
+        NN_layers.append(keras.layers.Dense(sizes[-1],activation='sigmoid'))
         NN_layers.append(keras.layers.Reshape((2,self.transform_size)))
         self.NN = keras.Sequential(NN_layers)
     
@@ -19,6 +19,7 @@ class AffineCoupling(keras.layers.Layer):
         xA = input[:,:self.pass_through_size]
         xB = input[:,self.pass_through_size:self.flow_size]
         shift_rescale = self.NN(xA)
+        shift_rescale[:,1]=tf.exp(shift_rescale[:,1])
         yB = tf.math.multiply(xB,shift_rescale[:,1])+shift_rescale[:,0]
         jacobian = input[:,self.flow_size]
         jacobian*= tf.reduce_prod(shift_rescale[:,1],axis=1)
