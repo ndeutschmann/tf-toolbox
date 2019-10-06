@@ -61,4 +61,4 @@ class PieceWiseLinear(keras.layers.Layer):
         bins = tf.math.floor(alphas)
         alphas -= bins
         bins = tf.cast(bins,tf.int32)
-        cdf_int_part =tf.gather(Qsum,tf.expand_dims(bins,axis=-1),batch_dims=-1,axis=2)
+        cdf_int_part =tf.gather(Qsum,tf.expand_dims(bins,axis=-1),batch_dims=-1,axis=-1)
