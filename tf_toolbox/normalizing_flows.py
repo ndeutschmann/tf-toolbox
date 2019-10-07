@@ -55,6 +55,7 @@ class PieceWiseLinear(keras.layers.Layer):
     def call(self,input):
         xA = input[:,:self.pass_through_size]
         xB = input[:,self.pass_through_size:self.flow_size]
+        jacobian = tf.expand_dims(input[:,self.flow_size],axis=-1)
         Q = NN(xA)
         Qsum=tf.cumsum(Q,axis=-1)
         Qnorms = tf.expand_dims(Qsum[:,:,-1],axis=-1)
@@ -68,5 +69,5 @@ class PieceWiseLinear(keras.layers.Layer):
         cdf_int_part =tf.gather(Qsum,tf.expand_dims(bins,axis=-1),batch_dims=-1,axis=-1)
         cdf_float_part = tf.gather(Q,tf.expand_dims(bins,axis=-1),batch_dims=-1,axis=-1)
         cdf = tf.reshape((cdf_float_part*tf.expand_dims(alphas,axis=-1))+cdf_int_part,cdf_int_part.shape[:-1])
-        jacobian = tf.reduce_prod(cdf_float_part,axis=-2)
+        jacobian *= tf.reduce_prod(cdf_float_part,axis=-2)
         return tf.concat((cdf,jacobian),axis=-1)
