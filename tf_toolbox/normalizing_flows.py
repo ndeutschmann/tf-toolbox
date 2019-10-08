@@ -71,10 +71,37 @@ class PieceWiseLinear(keras.layers.Layer):
         alphas = xB*self.n_bins
         bins = tf.math.floor(alphas)
         alphas -= bins
+        alphas/=self.n_bins
         bins = tf.cast(bins, tf.int32)
         # Sum of the integrals of the bins 
         cdf_int_part = tf.gather(Qsum, tf.expand_dims(bins, axis=-1), batch_dims=-1, axis=-1)
         cdf_float_part = tf.gather(Q, tf.expand_dims(bins, axis=-1), batch_dims=-1, axis=-1)
-        cdf = tf.reshape((cdf_float_part*tf.expand_dims(alphas, axis=-1)/self.n_bins)+cdf_int_part, cdf_int_part.shape[:-1])
+        cdf = tf.reshape((cdf_float_part*tf.expand_dims(alphas, axis=-1))+cdf_int_part, cdf_int_part.shape[:-1])
         jacobian *= tf.reduce_prod(cdf_float_part, axis=-2)
         return tf.concat((xA,cdf, jacobian), axis=-1)
+
+class InversePieceWiseLinear(keras.layers.Layer):
+    def __init__(self,ForwardLayer):
+        super(InversePieceWiseLinear, self).__init__()
+        self.pass_through_size = ForwardLayer.pass_through_size
+        self.flow_size = ForwardLayer.flow_size
+        self.transform_size = ForwardLayer.flow_size - ForwardLayer.pass_through_size
+        self.n_bins = ForwardLayer.n_bins
+        self.NN = ForwardLayer.NN
+
+    def call(self,y):
+        yA = y[:, :self.pass_through_size]
+        yB = y[:, self.pass_through_size:self.flow_size]
+        jacobian = tf.expand_dims(y[:, self.flow_size], axis=-1)
+        Q = self.NN(yA)
+        Qsum = tf.cumsum(Q, axis=-1)
+        Qnorms = tf.expand_dims(Qsum[:, :, -1], axis=-1)
+        Q /= Qnorms / self.n_bins
+        Qsum /= Qnorms
+        ybins = tf.searchsorted(Qsum, tf.expand_dims(yB, axis=-1))
+        paddedQsum = tf.pad(Qsum, [[0, 0], [0, 0], [1, 0]])
+        offsets = tf.squeeze(tf.gather(paddedQsum, ybins, batch_dims=-1))
+        slopes = tf.squeeze(tf.gather(Q, ybins, batch_dims=-1))
+        xB = (yB - offsets) / slopes + (tf.squeeze(tf.cast(ybins, tf.float32))) / self.n_bins
+        jacobian *= tf.expand_dims(tf.reduce_prod(tf.squeeze(1 / slopes), axis=-1), axis=-1)
+        return tf.concat((yA, xB, jacobian), axis=-1)
