@@ -50,9 +50,7 @@ class PieceWiseLinear(keras.layers.Layer):
         sizes = nn_layers + [(n_bins * self.transform_size)]
         nn_layers = [keras.layers.Dense(sizes[0], input_shape=(pass_through_size,), activation="relu")]
         for size in sizes[1:-1]:
-            nn_layers.append(
-                keras.layers.Dense(size,activation="relu")
-            )
+            nn_layers.append(keras.layers.Dense(size,activation="relu"))
 
         nn_layers.append(keras.layers.Dense(sizes[-1], activation="sigmoid"))
         nn_layers.append(keras.layers.Reshape((self.transform_size, n_bins)))
@@ -104,5 +102,5 @@ class InversePieceWiseLinear(keras.layers.Layer):
         offsets = tf.squeeze(tf.gather(paddedQsum, ybins, batch_dims=-1),axis=-1)
         slopes = tf.squeeze(tf.gather(Q, ybins, batch_dims=-1),axis=-1)
         xB = (yB - offsets) / slopes + (tf.squeeze(tf.cast(ybins, tf.float32),axis=-1)) / self.n_bins
-        jacobian *= tf.expand_dims(tf.reduce_prod(tf.squeeze(1 / slopes,axis=-1), axis=-1), axis=-1)
+        jacobian *= tf.expand_dims(tf.reduce_prod(1 / slopes, axis=-1), axis=-1)
         return tf.concat((yA, xB, jacobian), axis=-1)
