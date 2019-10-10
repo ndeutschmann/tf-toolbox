@@ -51,6 +51,8 @@ class PieceWiseLinear(keras.layers.Layer):
         nn_layers = [keras.layers.Dense(sizes[0], input_shape=(pass_through_size,), activation="relu")]
         for size in sizes[1:-1]:
             nn_layers.append(keras.layers.Dense(size,activation="relu"))
+            nn_layers.append(keras.layers.Dropout(0.05))
+            nn_layers.append(keras.layers.BatchNormalization())
 
         nn_layers.append(keras.layers.Dense(sizes[-1], activation="sigmoid"))
         nn_layers.append(keras.layers.Reshape((self.transform_size, n_bins)))
