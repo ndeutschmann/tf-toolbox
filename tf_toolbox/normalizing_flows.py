@@ -101,8 +101,8 @@ class InversePieceWiseLinear(keras.layers.Layer):
         Qsum /= Qnorms
         ybins = tf.searchsorted(Qsum, tf.expand_dims(yB, axis=-1))
         paddedQsum = tf.pad(Qsum, [[0, 0], [0, 0], [1, 0]])
-        offsets = tf.squeeze(tf.gather(paddedQsum, ybins, batch_dims=-1))
-        slopes = tf.squeeze(tf.gather(Q, ybins, batch_dims=-1))
-        xB = (yB - offsets) / slopes + (tf.squeeze(tf.cast(ybins, tf.float32))) / self.n_bins
-        jacobian *= tf.expand_dims(tf.reduce_prod(tf.squeeze(1 / slopes), axis=-1), axis=-1)
+        offsets = tf.squeeze(tf.gather(paddedQsum, ybins, batch_dims=-1),axis=-1)
+        slopes = tf.squeeze(tf.gather(Q, ybins, batch_dims=-1),axis=-1)
+        xB = (yB - offsets) / slopes + (tf.squeeze(tf.cast(ybins, tf.float32),axis=-1)) / self.n_bins
+        jacobian *= tf.expand_dims(tf.reduce_prod(tf.squeeze(1 / slopes,axis=-1), axis=-1), axis=-1)
         return tf.concat((yA, xB, jacobian), axis=-1)
