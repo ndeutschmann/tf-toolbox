@@ -105,3 +105,20 @@ class InversePieceWiseLinear(keras.layers.Layer):
         xB = (yB - offsets) / slopes + (tf.squeeze(tf.cast(ybins, tf.float32))) / self.n_bins
         jacobian *= tf.expand_dims(tf.reduce_prod(tf.squeeze(1 / slopes), axis=-1), axis=-1)
         return tf.concat((yA, xB, jacobian), axis=-1)
+
+class RollLayer(keras.layers.Layer):
+    def __init__(self,shift):
+        super(RollLayer,self).__init__()
+        self.shift = shift
+        self.inverse
+
+    def call(self,x):
+        return tf.roll(x,self.shift,axis=-1)
+
+class InverseRollLayer(keras.layers.Layer):
+    def __init__(self,roll_layer):
+        super(InverseRollLayer,self).__init__()
+        self.shift = -roll_layer.shift
+
+    def call(self,x):
+        return tf.roll(x,self.shift,axis=-1)
