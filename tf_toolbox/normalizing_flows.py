@@ -111,10 +111,10 @@ class RollLayer(keras.layers.Layer):
     def __init__(self,shift):
         super(RollLayer,self).__init__()
         self.shift = shift
-        self.inverse
+        self.inverse = InverseRollLayer(self)
 
     def call(self,x):
-        return tf.roll(x,self.shift,axis=-1)
+        return tf.concat((tf.roll(x[:,-1],self.shift,axis=-1),x[:,-1:]),axis=-1)
 
 class InverseRollLayer(keras.layers.Layer):
     def __init__(self,roll_layer):
@@ -122,4 +122,13 @@ class InverseRollLayer(keras.layers.Layer):
         self.shift = -roll_layer.shift
 
     def call(self,x):
-        return tf.roll(x,self.shift,axis=-1)
+        return tf.concat((tf.roll(x[:,-1],self.shift,axis=-1),x[:,-1:]),axis=-1)
+
+
+class NormalizingFlow(keras.Sequential):
+    def __init__(self,*args,**kwargs):
+        super(NormalizingFlow,self).__init__(*args,**kwargs)
+        self.inverse = keras.Sequential([l.inverse for l in self.layers])
+
+    def build_inverse(self):
+        self.inverse = keras.Sequential([l.inverse for l in self.layers])
