@@ -50,14 +50,15 @@ class PieceWiseLinear(keras.layers.Layer):
         sizes = nn_layers + [(n_bins * self.transform_size)]
         nn_layers = [keras.layers.Dense(sizes[0], input_shape=(pass_through_size,), activation="relu")]
         for size in sizes[1:-1]:
-            nn_layers.append(
-                keras.layers.Dense(size,activation="relu")
-            )
+            nn_layers.append(keras.layers.Dense(size,activation="relu"))
+            nn_layers.append(keras.layers.Dropout(0.05))
+            nn_layers.append(keras.layers.BatchNormalization())
 
         nn_layers.append(keras.layers.Dense(sizes[-1], activation="sigmoid"))
         nn_layers.append(keras.layers.Reshape((self.transform_size, n_bins)))
         self.NN = keras.Sequential(nn_layers)
-    
+        self.inverse = InversePieceWiseLinear(self)
+
     def call(self, x):
         xA = x[:, :self.pass_through_size]
         xB = x[:, self.pass_through_size:self.flow_size]
@@ -73,7 +74,7 @@ class PieceWiseLinear(keras.layers.Layer):
         alphas -= bins
         alphas/=self.n_bins
         bins = tf.cast(bins, tf.int32)
-        # Sum of the integrals of the bins 
+        # Sum of the integrals of the bins
         cdf_int_part = tf.gather(Qsum, tf.expand_dims(bins, axis=-1), batch_dims=-1, axis=-1)
         cdf_float_part = tf.gather(Q, tf.expand_dims(bins, axis=-1), batch_dims=-1, axis=-1)
         cdf = tf.reshape((cdf_float_part*tf.expand_dims(alphas, axis=-1))+cdf_int_part, cdf_int_part.shape[:-1])
@@ -81,13 +82,13 @@ class PieceWiseLinear(keras.layers.Layer):
         return tf.concat((xA,cdf, jacobian), axis=-1)
 
 class InversePieceWiseLinear(keras.layers.Layer):
-    def __init__(self,ForwardLayer):
+    def __init__(self, forward_layer):
         super(InversePieceWiseLinear, self).__init__()
-        self.pass_through_size = ForwardLayer.pass_through_size
-        self.flow_size = ForwardLayer.flow_size
-        self.transform_size = ForwardLayer.flow_size - ForwardLayer.pass_through_size
-        self.n_bins = ForwardLayer.n_bins
-        self.NN = ForwardLayer.NN
+        self.pass_through_size = forward_layer.pass_through_size
+        self.flow_size = forward_layer.flow_size
+        self.transform_size = forward_layer.flow_size - forward_layer.pass_through_size
+        self.n_bins = forward_layer.n_bins
+        self.NN = forward_layer.NN
 
     def call(self,y):
         yA = y[:, :self.pass_through_size]
@@ -100,8 +101,8 @@ class InversePieceWiseLinear(keras.layers.Layer):
         Qsum /= Qnorms
         ybins = tf.searchsorted(Qsum, tf.expand_dims(yB, axis=-1))
         paddedQsum = tf.pad(Qsum, [[0, 0], [0, 0], [1, 0]])
-        offsets = tf.squeeze(tf.gather(paddedQsum, ybins, batch_dims=-1))
-        slopes = tf.squeeze(tf.gather(Q, ybins, batch_dims=-1))
-        xB = (yB - offsets) / slopes + (tf.squeeze(tf.cast(ybins, tf.float32))) / self.n_bins
-        jacobian *= tf.expand_dims(tf.reduce_prod(tf.squeeze(1 / slopes), axis=-1), axis=-1)
+        offsets = tf.squeeze(tf.gather(paddedQsum, ybins, batch_dims=-1),axis=-1)
+        slopes = tf.squeeze(tf.gather(Q, ybins, batch_dims=-1),axis=-1)
+        xB = (yB - offsets) / slopes + (tf.squeeze(tf.cast(ybins, tf.float32),axis=-1)) / self.n_bins
+        jacobian *= tf.expand_dims(tf.reduce_prod(1 / slopes, axis=-1), axis=-1)
         return tf.concat((yA, xB, jacobian), axis=-1)
