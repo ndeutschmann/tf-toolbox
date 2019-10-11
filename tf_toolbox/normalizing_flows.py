@@ -54,7 +54,8 @@ class PieceWiseLinear(keras.layers.Layer):
             nn_layers.append(keras.layers.Dropout(0.05))
             nn_layers.append(keras.layers.BatchNormalization())
 
-        nn_layers.append(keras.layers.Dense(sizes[-1], activation="sigmoid"))
+        nn_layers.append(keras.layers.Dense(sizes[-1], activation="relu"))
+        nn_layers.append(keras.layers.Lambda(lambda x: x + 1e-3))
         nn_layers.append(keras.layers.Reshape((self.transform_size, n_bins)))
         self.NN = keras.Sequential(nn_layers)
         self.inverse = InversePieceWiseLinear(self)
