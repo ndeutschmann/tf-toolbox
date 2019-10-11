@@ -126,9 +126,32 @@ class InverseRollLayer(keras.layers.Layer):
         return tf.concat((tf.roll(x[:,:-1],-self.shift,axis=-1),x[:,-1:]),axis=-1)
 
 
-class NormalizingFlow(keras.Sequential):
+class NormalizingFlow:
 
     format_input = AddJacobian()
 
+    def __init__(self,flow_size,layers):
+        self.flow_size = flow_size
+        self.model = keras.Sequential()
+        self.inverse_model = keras.Sequential()
+        self.build_model(layers)
+        self.build_inverse()
+
+    def build_model(self,layers):
+        for l in layers:
+            if isinstance(l,PieceWiseLinear):
+                assert self.flow_size == l.flow_size
+            self.model.add(l)
+
+
     def build_inverse(self):
-        return keras.Sequential([l.inverse for l in reversed(self.layers)])
+        self.inverse_model = keras.Sequential([l.inverse for l in reversed(self.model.layers)])
+
+    def __call__(self,x):
+        return self.model(x)
+
+    def add(self,layer,rebuild_inverse=True):
+        if isinstance(layer,PieceWiseLinear):
+            assert self.flow_size == layer.flow_size
+        self.model.add(layer)
+        self.build_inverse()
