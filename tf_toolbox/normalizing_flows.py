@@ -1,5 +1,7 @@
 import tensorflow as tf
 import tensorflow.keras as keras
+import tensorflow_probability as tfp
+
 
 
 class AffineCoupling(keras.layers.Layer):
@@ -155,3 +157,32 @@ class NormalizingFlow:
             assert self.flow_size == layer.flow_size
         self.model.add(layer)
         self.build_inverse()
+
+
+    def train_variance(self,f ,n_batch = 10000,n_steps=1,n_epochs=10,*, optimizer):
+        for i in range(n_epochs):
+            # Generate some data
+            Xs,fXs = self.generate_data_batches(f,n_batch=n_batch,n_steps=n_steps)
+            for step in range(n_steps):
+                X = Xs[i]
+                fX = fXs[i]
+                with tf.GradientTape() as tape:
+                    J = self.inverse_model(self.format_input(X))[:, -1]
+                    loss = tfp.stats.variance(fX/J)
+                grads = tape.gradient(loss, self.model.trainable_variables)
+                optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+
+    def generate_data_batches(self,f,n_batch = 10000,n_steps=1):
+        # Get a batch of random latent space points,
+        # add a jacobian, generate a phase space sample using the model
+        # then get rid of the jacobian
+        X = self.model(
+            self.format_input(
+                tf.random.uniform((n_batch, self.flow_size), 0, 1)
+            )
+        )[:, :-1]
+        # Evaluate the function over the function
+        fX = f(X)
+        Xs = tf.split(X,n_steps,axis=0)
+        fXs = tf.split(fX,n_steps,axis=0)
+        return (Xs,fXs)
