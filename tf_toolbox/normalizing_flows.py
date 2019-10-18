@@ -163,10 +163,11 @@ class NormalizingFlow:
     def train_variance(self,f ,n_batch = 10000,n_steps=1,n_epochs=10,*, optimizer,log_var=True):
         if log_var:
             var_log = []
-        for i in tqdm(range(n_epochs)):
+        epoch_progress = tqdm(range(n_epochs),leave=False,desc="Loss: {0:.3e} | Epoch".format(0.))
+        for i in epoch_progress:
             # Generate some data
             Xs,fXs = self.generate_data_batches(f,n_batch=n_batch,n_steps=n_steps)
-            for step in range(n_steps):
+            for step in tqdm(range(n_steps),leave=False,desc="Step: "):
                 X = tf.stop_gradient(Xs[step])
                 fX = tf.stop_gradient(fXs[step])
                 with tf.GradientTape() as tape:
@@ -176,6 +177,7 @@ class NormalizingFlow:
                 optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
                 if log_var:
                     var_log.append(loss)
+                epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
         if log_var:
             return(var_log)
 
