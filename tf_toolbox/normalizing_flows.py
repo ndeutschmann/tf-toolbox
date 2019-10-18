@@ -1,6 +1,7 @@
 import tensorflow as tf
 import tensorflow.keras as keras
 import tensorflow_probability as tfp
+from tqdm.autonotebook import tqdm
 
 
 
@@ -159,18 +160,24 @@ class NormalizingFlow:
         self.build_inverse()
 
 
-    def train_variance(self,f ,n_batch = 10000,n_steps=1,n_epochs=10,*, optimizer):
-        for i in range(n_epochs):
+    def train_variance(self,f ,n_batch = 10000,n_steps=1,n_epochs=10,*, optimizer,log_var=True):
+        if log_var:
+            var_log = []
+        for i in tqdm(range(n_epochs)):
             # Generate some data
             Xs,fXs = self.generate_data_batches(f,n_batch=n_batch,n_steps=n_steps)
             for step in range(n_steps):
-                X = Xs[i]
-                fX = fXs[i]
+                X = tf.stop_gradient(Xs[step])
+                fX = tf.stop_gradient(fXs[step])
                 with tf.GradientTape() as tape:
                     J = self.inverse_model(self.format_input(X))[:, -1]
                     loss = tfp.stats.variance(fX/J)
                 grads = tape.gradient(loss, self.model.trainable_variables)
                 optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+                if log_var:
+                    var_log.append(loss)
+        if log_var:
+            return(var_log)
 
     def generate_data_batches(self,f,n_batch = 10000,n_steps=1):
         # Get a batch of random latent space points,
