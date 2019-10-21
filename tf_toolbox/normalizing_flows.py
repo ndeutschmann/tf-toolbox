@@ -184,6 +184,73 @@ class NormalizingFlow:
         if log_var:
             return(var_log)
 
+    def train_variance_forward(self,f ,n_batch = 10000,n_steps=1,n_epochs=10,*, optimizer,log_var=True):
+        if log_var:
+            var_log = []
+        epoch_progress = tqdm(range(n_epochs),leave=False,desc="Loss: {0:.3e} | Epoch".format(0.))
+        for i in epoch_progress:
+            with tf.GradientTape() as tape:
+                XJ = self.model(
+                    self.format_input(
+                        tf.random.uniform((n_batch, self.flow_size), 0, 1)
+                    )
+                )
+                X = tf.stop_gradient(XJ[:,:-1])
+                J = XJ[:,-1]
+                fX = f(X)
+                loss = tf.math.log(tfp.stats.variance(fX*J))
+                loss+=sum(self.inverse_model.losses)
+            grads = tape.gradient(loss, self.model.trainable_variables)
+            optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+            if log_var:
+                var_log.append(loss)
+            epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
+        if log_var:
+            return(var_log)
+
+    def train_KL_forward(self,f ,n_batch = 10000,n_steps=1,n_epochs=10,*, optimizer,log_var=True):
+        if log_var:
+            var_log = []
+        epoch_progress = tqdm(range(n_epochs),leave=False,desc="Loss: {0:.3e} | Epoch".format(0.))
+        for i in epoch_progress:
+            with tf.GradientTape() as tape:
+                XJ = self.model(
+                    self.format_input(
+                        tf.random.uniform((n_batch, self.flow_size), 0, 1)
+                    )
+                )
+                X = tf.stop_gradient(XJ[:,:-1])
+                J = XJ[:,-1]
+                fX = f(X)
+                loss = tf.reduce_mean(J*fX*tf.math.log(J+1e-3))
+                loss+=sum(self.inverse_model.losses)
+            grads = tape.gradient(loss, self.model.trainable_variables)
+            optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+            if log_var:
+                var_log.append(loss)
+            epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
+        if log_var:
+            return(var_log)
+
+    def train_KL_flat(self,f ,n_batch = 10000,n_steps=1,n_epochs=10,*, optimizer,log_var=True):
+        if log_var:
+            var_log = []
+        epoch_progress = tqdm(range(n_epochs),leave=False,desc="Loss: {0:.3e} | Epoch".format(0.))
+        for i in epoch_progress:
+            with tf.GradientTape() as tape:
+                X=tf.random.uniform((n_batch, self.flow_size), 0, 1)
+                J = self.inverse_model(self.format_input(X))[:,-1]
+                fX = f(X)
+                loss = tf.reduce_mean(-fX/J*tf.math.log(J))
+                loss+=sum(self.inverse_model.losses)
+            grads = tape.gradient(loss, self.model.trainable_variables)
+            optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+            if log_var:
+                var_log.append(loss)
+            epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
+        if log_var:
+            return(var_log)
+
     def generate_data_batches(self,f,n_batch = 10000,n_steps=1):
         # Get a batch of random latent space points,
         # add a jacobian, generate a phase space sample using the model
