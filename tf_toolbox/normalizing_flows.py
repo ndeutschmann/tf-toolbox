@@ -44,20 +44,20 @@ class AddJacobian(keras.layers.Layer):
 
 # WIP
 class PieceWiseLinear(keras.layers.Layer):
-    def __init__(self, flow_size, pass_through_size, n_bins=10, nn_layers=[]):
+    def __init__(self, flow_size, pass_through_size, n_bins=10, nn_layers=[],reg=0.):
         super(PieceWiseLinear,self).__init__()
         self.pass_through_size = pass_through_size
         self.flow_size = flow_size
         self.transform_size = flow_size - pass_through_size
         self.n_bins = n_bins
         sizes = nn_layers + [(n_bins * self.transform_size)]
-        nn_layers = [keras.layers.Dense(sizes[0], input_shape=(pass_through_size,), activation="relu")]
+        nn_layers = [keras.layers.Dense(sizes[0], input_shape=(pass_through_size,), activation="relu",kernel_regularizer=tf.keras.regularizers.l2(reg))]
         for size in sizes[1:-1]:
-            nn_layers.append(keras.layers.Dense(size,activation="relu"))
-            nn_layers.append(keras.layers.Dropout(0.05))
+            nn_layers.append(keras.layers.Dense(size,activation="relu",kernel_regularizer=tf.keras.regularizers.l2(reg)))
+            #nn_layers.append(keras.layers.Dropout(0.05))
             nn_layers.append(keras.layers.BatchNormalization())
 
-        nn_layers.append(keras.layers.Dense(sizes[-1], activation="sigmoid"))
+        nn_layers.append(keras.layers.Dense(sizes[-1], activation="sigmoid",kernel_regularizer=tf.keras.regularizers.l2(reg)))
         nn_layers.append(keras.layers.Reshape((self.transform_size, n_bins)))
         self.NN = keras.Sequential(nn_layers)
         self.inverse = InversePieceWiseLinear(self)
@@ -173,7 +173,8 @@ class NormalizingFlow:
                 fX = tf.stop_gradient(fXs[step])
                 with tf.GradientTape() as tape:
                     J = self.inverse_model(self.format_input(X))[:, -1]
-                    loss = tfp.stats.variance(fX/J)
+                    loss = tf.math.log(tfp.stats.variance(fX/J))
+                    loss+=sum(self.inverse_model.losses)
                 grads = tape.gradient(loss, self.model.trainable_variables)
                 optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
                 if log_var:
