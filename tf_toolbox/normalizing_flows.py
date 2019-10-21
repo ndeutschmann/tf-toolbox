@@ -164,10 +164,11 @@ class NormalizingFlow:
         if log_var:
             var_log = []
         epoch_progress = tqdm(range(n_epochs),leave=False,desc="Loss: {0:.3e} | Epoch".format(0.))
+        step_progress = tqdm_recycled(range(n_steps),desc="Step: ")
         for i in epoch_progress:
             # Generate some data
             Xs,fXs = self.generate_data_batches(f,n_batch=n_batch,n_steps=n_steps)
-            for step in tqdm(range(n_steps),leave=False,desc="Step: "):
+            for step in step_progress:
                 X = tf.stop_gradient(Xs[step])
                 fX = tf.stop_gradient(fXs[step])
                 with tf.GradientTape() as tape:
@@ -178,6 +179,7 @@ class NormalizingFlow:
                 if log_var:
                     var_log.append(loss)
                 epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
+        step_progress.really_close()
         if log_var:
             return(var_log)
 
@@ -195,3 +197,17 @@ class NormalizingFlow:
         Xs = tf.split(X,n_steps,axis=0)
         fXs = tf.split(fX,n_steps,axis=0)
         return (Xs,fXs)
+
+
+class tqdm_recycled(tqdm):
+
+    def close(self):
+        self.reset()
+
+    def really_close(self):
+        try:
+            self.sp(close=True)
+        except AttributeError as e:
+            pass
+            #print("tqdm_recycled objects can be 'really closed' only when used in a jupyter notebook.")
+            #raise e
