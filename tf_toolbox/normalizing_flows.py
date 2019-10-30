@@ -44,7 +44,7 @@ class AddJacobian(keras.layers.Layer):
 
 # WIP
 class PieceWiseLinear(keras.layers.Layer):
-    def __init__(self, flow_size, pass_through_size, n_bins=10, nn_layers=[],reg=0.,dropout=0.):
+    def __init__(self, flow_size, pass_through_size, n_bins=10, nn_layers=[],reg=0.,dropout=0., final_activation="sigmoid"):
         super(PieceWiseLinear,self).__init__()
         self.pass_through_size = pass_through_size
         self.flow_size = flow_size
@@ -58,7 +58,7 @@ class PieceWiseLinear(keras.layers.Layer):
                 nn_layers.append(keras.layers.Dropout(dropout))
             nn_layers.append(keras.layers.BatchNormalization())
 
-        nn_layers.append(keras.layers.Dense(sizes[-1], activation="sigmoid",kernel_regularizer=tf.keras.regularizers.l2(reg)))
+        nn_layers.append(keras.layers.Dense(sizes[-1], activation=final_activation,kernel_regularizer=tf.keras.regularizers.l2(reg)))
         nn_layers.append(keras.layers.Reshape((self.transform_size, n_bins)))
         self.NN = keras.Sequential(nn_layers)
         self.inverse = InversePieceWiseLinear(self)
