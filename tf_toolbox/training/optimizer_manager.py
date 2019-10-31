@@ -59,5 +59,5 @@ class SGDManager(OptimizerManager):
         else:
             raise AttributeError("No optimizer was instantiated")
 
-    def create_optimizer(self, learning_rate=0.01):
+    def create_optimizer(self, learning_rate=0.01, **opts):
         self._optimizer = SGD(learning_rate=learning_rate)

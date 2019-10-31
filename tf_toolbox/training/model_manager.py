@@ -85,7 +85,7 @@ class DenseRectClassifierManager(ModelManager):
     def metrics(self):
         return self._metrics
 
-    def create_model(self,*, optimizer, loss, n_layers, layer_size, layer_activation="relu", reg=0.):
+    def create_model(self,*, optimizer, loss_function, n_layers, layer_size, layer_activation="relu", reg=0., **opts):
 
         self._model = keras.Sequential()
         self._model.add(keras.Input(shape=(self.input_size,)))
@@ -100,7 +100,7 @@ class DenseRectClassifierManager(ModelManager):
 
         self._model.compile(
             optimizer=optimizer,
-            loss=loss,
+            loss=loss_function,
             metrics=["accuracy"]
         )
 
