@@ -39,7 +39,7 @@ class ModelManager(ABC):
         pass
 
     @abstractmethod
-    def train_model(self,*,model,**training_parameters):
+    def train_model(self,**training_parameters):
         """Train a model using a given set of training parameters.
         Depending on the model these training parameters might be data and labels, training strategy specifics,
         loss functions, etc.
@@ -47,7 +47,7 @@ class ModelManager(ABC):
 
 class DenseRectClassifierManager(ModelManager):
     """A dense rectangular classifier (all layers have the same size)"""
-    def __init__(self,input_size,n_classes,activations=["relu"],losses=["categorical_cross_entropy"]):
+    def __init__(self,*,input_size,n_classes,activations=("relu",),losses=("categorical_crossentropy",)):
         self.input_size = input_size
         self.n_classes = n_classes
 
@@ -72,7 +72,6 @@ class DenseRectClassifierManager(ModelManager):
         }
 
         self._metrics = {
-            "loss" : hp.Metric("loss",display_name="Loss"),
             "accuracy" : hp.Metric("accuracy",display_name="Accuracy")
         }
 
@@ -86,28 +85,28 @@ class DenseRectClassifierManager(ModelManager):
     def metrics(self):
         return self._metrics
 
-    def create_model(self,*, optimizer, loss, n_layers, layer_size, layer_activation, reg):
+    def create_model(self,*, optimizer, loss, n_layers, layer_size, layer_activation="relu", reg=0.):
 
         self._model = keras.Sequential()
         self._model.add(keras.Input(shape=(self.input_size,)))
-        for i in range(n_layers)
-            self._model.add(keras.Dense(layer_size,
-                                       activation=layer_activation,
-                                       kernel_regularizer=keras.regularizers.l2(reg)
+        for i in range(n_layers):
+            self._model.add(keras.layers.Dense(layer_size,
+                                        activation=layer_activation,
+                                        kernel_regularizer=keras.regularizers.l2(reg)
             ))
-        self._model.add(keras.Dense(self.n_classes,
+        self._model.add(keras.layers.Dense(self.n_classes,
                                     activation="softmax",
                                     kernel_regularizer=None))
 
         self._model.compile(
             optimizer=optimizer,
             loss=loss,
-            metrics = ["loss","accuracy"]
+            metrics=["accuracy"]
         )
 
     @property
     def model(self):
         if self._model is not None:
-            return self
+            return self._model
         else:
             raise AttributeError("No model was instantiated")
