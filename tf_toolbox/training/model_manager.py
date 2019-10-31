@@ -110,3 +110,11 @@ class DenseRectClassifierManager(ModelManager):
             return self._model
         else:
             raise AttributeError("No model was instantiated")
+
+    def train_model(self, X, y, *, batch_size, epochs, logdir=None, **fit_options):
+        callbacks = []
+        if logdir is not None:
+            metrics_callback = keras.callbacks.TensorBoard(log_dir=logdir)
+            callbacks = [metrics_callback]
+
+        return self.model.fit(X, y, epochs=epochs, batch_size=batch_size, callbacks=callbacks, **fit_options)

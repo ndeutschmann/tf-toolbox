@@ -38,6 +38,9 @@ class SGDManager(OptimizerManager):
     def __init__(self, lr_range = (1.e-8,1.)):
         """Create a SGD manager with a specific learning rate range"""
         self._hparam = {
+            "optimizer": hp.HParam("optimizer",
+                                       domain=hp.Discrete(['naive SGD']),
+                                       display_name="Optimizer"),
             "learning_rate": hp.HParam("learning_rate",
                                        domain=hp.RealInterval(*lr_range),
                                        display_name="Learning rate"),
@@ -52,7 +55,7 @@ class SGDManager(OptimizerManager):
     @property
     def optimizer(self):
         if self._optimizer is not None:
-            return self.optimizer
+            return self._optimizer
         else:
             raise AttributeError("No optimizer was instantiated")
 
