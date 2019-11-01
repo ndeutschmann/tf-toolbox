@@ -27,7 +27,7 @@ class ModelManager(ABC):
         pass
 
     @abstractmethod
-    def create_model(self,*, optimizer, loss, **model_parameters):
+    def create_model(self, **model_parameters):
         """Instantiate a model with a specific optimizer and loss
          and set of model hyperparameter values"""
         pass
