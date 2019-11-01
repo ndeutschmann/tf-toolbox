@@ -55,7 +55,7 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
         self._hparam = {
             "n_pass_through": hp.HParam("n_pass_through", domain=hp.IntInterval(_n_pass_through_domain),display_name="# Pass"),
 
-            "n_cells": hp.HParam("n_cells",domain=hp.IntInterval(n_cells_domain),display_name="# Cells")
+            "n_cells": hp.HParam("n_cells",domain=hp.IntInterval(n_cells_domain),display_name="# Cells"),
 
             "n_bins": hp.HParam("n_bins", domain=hp.IntInterval(n_bins_domain),display_name="# Bins"),
 
