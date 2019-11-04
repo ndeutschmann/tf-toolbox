@@ -25,7 +25,7 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
     """
     def __init__(self,
                  *
-                 n_flow,
+                 n_flow: int,
                  n_pass_through_domain = None,
                  n_cells_domain=(1,10),
                  n_bins_domain = (2,10),
@@ -35,12 +35,14 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
                  roll_step_domain = None,
                  l2_reg_domain = (0,1),
                  dropout_rate_domain = (0,1),
+                 n_batch_domain = (1e2,1e6),
                  **init_opts
 ):
         self.n_flow = n_flow
         self._model = None
         self._inverse_model = None
 
+        # Some domains do not have an explicit default value as we want them to be dependent on other domains
         if n_pass_through_domain is None:
             _n_pass_through_domain = [1,n_flow-1]
         else: _n_pass_through_domain=n_pass_through_domain
@@ -53,6 +55,13 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
             _roll_step_domain = [1,n_flow-1]
         else: _roll_step_domain=roll_step_domain
 
+        # **Hyperparameters**
+        # Note that we include the number of batch points for training.
+        # This is because we only have an estimator for the loss (which is defined as an integral)
+        # And batch statistics has an impact on convergence
+        # Pedagogical note: a contrario if we divide this sample into N minibatches and accumulate the gradients
+        # before taking an optimizer step (typically for memory reasons)
+        # TODO implement minibatches
         self._hparam = {
             "n_pass_through": hp.HParam("n_pass_through", domain=hp.IntInterval(_n_pass_through_domain),display_name="# Pass"),
 
@@ -72,6 +81,9 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
 
             "dropout_rate": hp.HParam("dropout_rate", domain=hp.RealInterval(dropout_rate_domain),display_name="Dropout rate"),
 
+            "n_batch": hp.HParam("n_batch", domain=hp.IntInterval(n_batch_domain),
+                                      display_name="# Batch points"),
+
         }
 
         self._metrics = {
@@ -81,6 +93,10 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
     @property
     def hparam(self):
         return self._hparam
+
+    @property
+    def metrics(self):
+        return self._metrics
 
     @property
     def model(self):
@@ -116,28 +132,52 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
         for i_cell in range(n_cells):
             nn_layers = [nn_width]*nn_depth
             self._model.add(
-                PieceWiseLinear(self.n_flow,n_pass_through,n_bins=n_bins,nn_layers=nn_layers,reg=l2_reg,dropout=dropout_rate)
+                PieceWiseLinear(self.n_flow, n_pass_through, n_bins=n_bins, nn_layers=nn_layers,
+                                reg=l2_reg, dropout=dropout_rate)
             )
             self._model.add(RollLayer(roll_step))
 
         self._inverse_model = keras.Sequential([l.inverse for l in reversed(self._model.layers)])
 
-    def train_model(self, train_mode = "variance_forward", **train_opts):
+    def train_model(self, train_mode = "variance_forward", n_batch = 10000, n_epochs=10, logging=True, log_tb=True,
+                    pretty_progressbar=True, *, f,optimizer, logdir, hparam, **train_opts):
         """Training method that dispatches the model into the different training modes.
+
         Training modes are implemented as methods named with the convention _train_{train_mode}
         and are expected to return TODO
         Currently implemented modes are
             - variance_forward
-                options are (TODO)
+                specific options are (TODO)
+
+        ---
+        **Signature (options common to all modes)**
+        train_model(train_mode = "variance_forward", n_batch = 10000, n_epochs=10, logging=True, log_tb=True,
+                    pretty_progressbar=True, *, f, optimizer, logdir, hparam)
+
+        f: function to train on
+        logging: return loss and accuracy histories
+        log_tb: log metrics and hparams into tensorboard (tb)
+        logdir: where to log tb data
+        hparam: tb.plugins.hparam.Hparam-keyed dict for hparam logging in tb. TODO add YAML logging w/o tb
         """
         try:
             trainer = getattr(self,"_train_"+train_mode)
         except AttributeError as error:
             raise AttributeError("The train mode %s does not exist."%train_mode)
 
-        return trainer(**train_opts)
+        # if we use tensorboard, log the Hyperparameter values and start training
+        if log_tb:
+            with tf.summary.create_file_writer(logdir).as_default():
+                hp.hparams(hparam)
+                return trainer(f, n_batch=n_batch, n_epochs=n_epochs, logging=logging, log_tb=log_tb,
+                    pretty_progressbar=pretty_progressbar, optimizer=optimizer, **train_opts)
+        # Otherwise just start training
+        else:
+            return trainer(f, n_batch=n_batch, n_epochs=n_epochs, logging=logging, log_tb=log_tb,
+                           pretty_progressbar=pretty_progressbar, optimizer=optimizer, **train_opts)
 
-    def _train_variance_forward(self, f, n_batch = 10000, n_epochs=10, *, optimizer, logging=True, log_tb=True, pretty_progressbar=True, **train_opts):
+    def _train_variance_forward(self, f, n_batch = 10000, n_epochs=10, logging=True, log_tb=True,
+                                pretty_progressbar=True, *, optimizer, **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
         See notes equation TODO
@@ -145,7 +185,7 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
 
         # Instantiate a pretty launchbar if needed
         if pretty_progressbar:
-            epoch_progress = tqdm(range(n_epochs),leave=False,desc="Loss: {0:.3e} | Epoch".format(0.))
+            epoch_progress = tqdm(range(n_epochs), leave=False, desc="Loss: {0:.3e} | Epoch".format(0.))
         else:
             epoch_progress = range(n_epochs)
 
@@ -159,7 +199,7 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
                 # Output a sample of (phase-space point, forward Jacobian)
                 XJ = self.model(                                            # Pass through the model
                     self.format_input(                                      # Append a unit Jacobian to each point
-                        tf.random.uniform((n_batch, self.flow_size), 0, 1)  # Generate a batch of points in latent space
+                        tf.random.uniform((n_batch, self.n_flow), 0, 1)  # Generate a batch of points in latent space
                     )
                 )
                 # Separate the points and their Jacobians:
@@ -167,7 +207,7 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
                 X = tf.stop_gradient(XJ[:,:-1])
                 # The Jacobian is the last entry of each point
                 J = XJ[:,-1]
-                # Apply function vlaues
+                # Apply function values
                 fX = f(X)
 
                 # The Monte Carlo integrand is fX*J: we minimize its variance
@@ -175,7 +215,7 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
                 std = tf.math.sqrt(tf.stop_gradient(loss))
                 loss = tf.math.log(loss)
                 # Regularization losses are collected as we move forward in the model
-                loss+=sum(self.model.losses)
+                loss += sum(self.model.losses)
 
             # Compute and apply gradients
             grads = tape.gradient(loss, self.model.trainable_variables)
@@ -190,8 +230,9 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
                 history.on_epoch_end(epoch=i,logs={"loss":loss.numpy(), "std":std.numpy()})
 
             # Log the data in tensorboard
-            tf.summary.scalar('loss', data=loss, step=i)
-            tf.summary.scalar('std',data=std,step=i)
+            if log_tb:
+                tf.summary.scalar('loss', data=loss, step=i)
+                tf.summary.scalar('std',  data=std,  step=i)
 
             if logging:
                 return history
