@@ -1,5 +1,5 @@
 from abc import ABC,abstractmethod,abstractproperty
-from tensorflow.keras.optimizers import SGD
+from tensorflow.keras.optimizers import SGD,Adam,Adamax
 import tensorboard.plugins.hparams.api as hp
 
 class OptimizerManager(ABC):
@@ -61,3 +61,96 @@ class SGDManager(OptimizerManager):
 
     def create_optimizer(self, learning_rate=0.01, **opts):
         self._optimizer = SGD(learning_rate=learning_rate)
+
+
+class AdamManager(OptimizerManager):
+    """An optimizer for the Adam/Amsgrad/Adamax optimizer"""
+
+    def __init__(self,
+                 lr_range = (1.e-8,1.),
+                 beta_1_range = (1. - 1.e-1, 1. - 1.e-4),
+                 beta_2_range = (1. - 1.e-3, 1. - 1e-6),
+                 epsilon_range = (1.e-8,1.e-3)):
+        """Create an Adam/Adamax manager with a specific range for hyperparameters
+        A last non-tunable hyperparameter is `optimizer`, which can be Adam, Amsgrad, Adamax.
+
+        Args:
+            lr_range ():
+            beta_1_range ():
+            beta_2_range ():
+            epsilon_range ():
+        """
+        self._hparam = {
+            "optimizer": hp.HParam("optimizer",
+                                       domain=hp.Discrete(['Adam','Amsgrad','Adamax']),
+                                       display_name="Optimizer"),
+            "learning_rate": hp.HParam("learning_rate",
+                                       domain=hp.RealInterval(*lr_range),
+                                       display_name="Learning rate"),
+            "beta_1": hp.HParam("beta_1",
+                                       domain=hp.RealInterval(*beta_1_range),
+                                       display_name="Beta1"),
+            "beta_2": hp.HParam("beta_2",
+                                       domain=hp.RealInterval(*beta_2_range),
+                                       display_name="Beta2"),
+            "epsilon": hp.HParam("epsilon",
+                                       domain=hp.RealInterval(*epsilon_range),
+                                       display_name="Epsilon"),
+        }
+
+        self._optimizer = None
+
+    @property
+    def hparam(self):
+        return self._hparam
+
+    @property
+    def optimizer(self):
+        if self._optimizer is not None:
+            return self._optimizer
+        else:
+            raise AttributeError("No optimizer was instantiated")
+
+    def create_optimizer(self,
+                         optimizer="Adam",
+                         learning_rate=0.01,
+                         beta_1=0.9,
+                         beta_2=0.999,
+                         epsilon=1.e-7,
+                         **opts):
+        """
+
+        Args:
+            optimizer ():
+            learning_rate ():
+            beta_1 ():
+            beta_2 ():
+            epsilon ():
+            **opts ():
+
+        Returns:
+
+        """
+
+        assert isinstance(optimizer, str)
+
+        if optimizer == "Adam":
+            self._optimizer = Adam(learning_rate=learning_rate,
+                                   beta_1=beta_1,
+                                   beta_2=beta_2,
+                                   epsilon=epsilon,
+                                   amsgrad=False)
+        elif optimizer == "Amsgrad":
+            self._optimizer = Adam(learning_rate=learning_rate,
+                                   beta_1=beta_1,
+                                   beta_2=beta_2,
+                                   epsilon=epsilon,
+                                   amsgrad=True)
+        elif optimizer == "Adamax":
+            self._optimizer = Adamax(learning_rate=learning_rate,
+                                   beta_1=beta_1,
+                                   beta_2=beta_2,
+                                   epsilon=epsilon)
+
+        else:
+            raise ValueError("Unknown optimizer mode for AdamXManager: {}".format(optimizer))
