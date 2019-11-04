@@ -6,7 +6,7 @@ from tqdm.autonotebook import tqdm
 from .layers import AddJacobian,PieceWiseLinear,RollLayer
 import tf_toolbox.training.abstract_managers as AM
 
-class RollingPWlinearNormalizingFlow(AM.ModelManager):
+class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
     """A manager for normalizing flows with piecewise linear coupling cells interleaved with rolling layers that
     apply cyclic permutations on the variables. All cells have the same number of pass through variables and the
     same step size in the cyclic permutation.
@@ -24,7 +24,7 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
     - TODO training mode
     """
     def __init__(self,
-                 *
+                 *,
                  n_flow: int,
                  n_pass_through_domain = None,
                  n_cells_domain=(1,10),
@@ -33,11 +33,27 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
                  nn_depth_domain = (1,10),
                  nn_activation_domain = ("relu",),
                  roll_step_domain = None,
-                 l2_reg_domain = (0,1),
-                 dropout_rate_domain = (0,1),
-                 n_batch_domain = (1e2,1e6),
+                 l2_reg_domain = (0.,1.),
+                 dropout_rate_domain = (0.,1.),
+                 n_batch_domain = (100,1000000),
                  **init_opts
 ):
+        """
+
+        Args:
+            n_flow ():
+            n_pass_through_domain ():
+            n_cells_domain ():
+            n_bins_domain ():
+            nn_width_domain ():
+            nn_depth_domain ():
+            nn_activation_domain ():
+            roll_step_domain ():
+            l2_reg_domain ():
+            dropout_rate_domain ():
+            n_batch_domain ():
+            **init_opts ():
+        """
         self.n_flow = n_flow
         self._model = None
         self._inverse_model = None
@@ -63,25 +79,25 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
         # before taking an optimizer step (typically for memory reasons)
         # TODO implement minibatches
         self._hparam = {
-            "n_pass_through": hp.HParam("n_pass_through", domain=hp.IntInterval(_n_pass_through_domain),display_name="# Pass"),
+            "n_pass_through": hp.HParam("n_pass_through", domain=hp.IntInterval(*_n_pass_through_domain),display_name="# Pass"),
 
-            "n_cells": hp.HParam("n_cells",domain=hp.IntInterval(n_cells_domain),display_name="# Cells"),
+            "n_cells": hp.HParam("n_cells",domain=hp.IntInterval(*n_cells_domain),display_name="# Cells"),
 
-            "n_bins": hp.HParam("n_bins", domain=hp.IntInterval(n_bins_domain),display_name="# Bins"),
+            "n_bins": hp.HParam("n_bins", domain=hp.IntInterval(*n_bins_domain),display_name="# Bins"),
 
-            "nn_width": hp.HParam("nn_width", domain=hp.IntInterval(_nn_width_domain),display_name="NN width"),
+            "nn_width": hp.HParam("nn_width", domain=hp.IntInterval(*_nn_width_domain),display_name="NN width"),
 
-            "nn_depth": hp.HParam("nn_depth", domain=hp.IntInterval(nn_depth_domain),display_name="NN depth"),
+            "nn_depth": hp.HParam("nn_depth", domain=hp.IntInterval(*nn_depth_domain),display_name="NN depth"),
 
-            "nn_activation": hp.HParam("nn_activation", domain=hp.Discrete(nn_activation_domain),display_name="NN activ. fct."),
+            "nn_activation": hp.HParam("nn_activation", domain=hp.Discrete(*nn_activation_domain),display_name="NN activ. fct."),
 
-            "roll_step": hp.HParam("roll_step", domain=hp.IntInterval(_roll_step_domain),display_name="Roll step"),
+            "roll_step": hp.HParam("roll_step", domain=hp.IntInterval(*_roll_step_domain),display_name="Roll step"),
 
-            "l2_reg": hp.HParam("l2_reg", domain=hp.RealInterval(l2_reg_domain),display_name="L2 reg."),
+            "l2_reg": hp.HParam("l2_reg", domain=hp.RealInterval(*l2_reg_domain),display_name="L2 reg."),
 
-            "dropout_rate": hp.HParam("dropout_rate", domain=hp.RealInterval(dropout_rate_domain),display_name="Dropout rate"),
+            "dropout_rate": hp.HParam("dropout_rate", domain=hp.RealInterval(*dropout_rate_domain),display_name="Dropout rate"),
 
-            "n_batch": hp.HParam("n_batch", domain=hp.IntInterval(n_batch_domain),
+            "n_batch": hp.HParam("n_batch", domain=hp.IntInterval(*n_batch_domain),
                                       display_name="# Batch points"),
 
         }
@@ -124,8 +140,27 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
                      roll_step,
                      l2_reg=0,
                      dropout_rate=0,
+                     optimizer_object,
                      **opts
                      ):
+        """
+
+        Args:
+            n_pass_through ():
+            n_cells ():
+            n_bins ():
+            nn_width ():
+            nn_depth ():
+            nn_activation ():
+            roll_step ():
+            l2_reg ():
+            dropout_rate ():
+            optimizer_object():
+            **opts ():
+
+        Returns:
+
+        """
 
         self._model = keras.Sequential()
 
@@ -139,26 +174,40 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
 
         self._inverse_model = keras.Sequential([l.inverse for l in reversed(self._model.layers)])
 
+        self.optimizer_object = optimizer_object
+
     def train_model(self, train_mode = "variance_forward", n_batch = 10000, n_epochs=10, logging=True, log_tb=True,
-                    pretty_progressbar=True, *, f,optimizer, logdir, hparam, **train_opts):
+                    pretty_progressbar=True, *, f, logdir, hparam, **train_opts):
         """Training method that dispatches the model into the different training modes.
 
         Training modes are implemented as methods named with the convention _train_{train_mode}
-        and are expected to return TODO
-        Currently implemented modes are
-            - variance_forward
-                specific options are (TODO)
 
-        ---
-        **Signature (options common to all modes)**
-        train_model(train_mode = "variance_forward", n_batch = 10000, n_epochs=10, logging=True, log_tb=True,
+        Currently implemented modes are
+            * variance_forward
+                specific options are (TODO)
+            * TODO
+
+        Note:
+            * signature
+            train_model(train_mode = "variance_forward", n_batch = 10000, n_epochs=10, logging=True, log_tb=True,
                     pretty_progressbar=True, *, f, optimizer, logdir, hparam)
 
-        f: function to train on
-        logging: return loss and accuracy histories
-        log_tb: log metrics and hparams into tensorboard (tb)
-        logdir: where to log tb data
-        hparam: tb.plugins.hparam.Hparam-keyed dict for hparam logging in tb. TODO add YAML logging w/o tb
+        Args:
+            f (): function to train on
+            logging (): return loss and accuracy histories?
+            log_tb (): log metrics and hparams into tensorboard (tb)?
+            logdir (): where to log tb data
+            hparam (): tb.plugins.hparam.Hparam-keyed dict for hparam logging in tb. TODO add YAML logging w/o tb
+            train_mode ():
+            n_batch ():
+            n_epochs ():
+            pretty_progressbar ():
+            optimizer ():
+            **train_opts ():
+
+        Returns:
+            keras.callbacks.History
+
         """
         try:
             trainer = getattr(self,"_train_"+train_mode)
@@ -170,17 +219,30 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
             with tf.summary.create_file_writer(logdir).as_default():
                 hp.hparams(hparam)
                 return trainer(f, n_batch=n_batch, n_epochs=n_epochs, logging=logging, log_tb=log_tb,
-                    pretty_progressbar=pretty_progressbar, optimizer=optimizer, **train_opts)
+                    pretty_progressbar=pretty_progressbar, optimizer_object=self.optimizer_object, **train_opts)
         # Otherwise just start training
         else:
             return trainer(f, n_batch=n_batch, n_epochs=n_epochs, logging=logging, log_tb=log_tb,
-                           pretty_progressbar=pretty_progressbar, optimizer=optimizer, **train_opts)
+                           pretty_progressbar=pretty_progressbar, optimizer_object=self.optimizer_object, **train_opts)
 
     def _train_variance_forward(self, f, n_batch = 10000, n_epochs=10, logging=True, log_tb=True,
-                                pretty_progressbar=True, *, optimizer, **train_opts):
+                                pretty_progressbar=True, *, optimizer_object, **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
         See notes equation TODO
+
+        Args:
+            f ():
+            n_batch ():
+            n_epochs ():
+            logging ():
+            log_tb ():
+            pretty_progressbar ():
+            optimizer ():
+            **train_opts ():
+
+        Returns:
+
         """
 
         # Instantiate a pretty launchbar if needed
@@ -192,6 +254,7 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
         # Keep track of metric history if needed
         if logging:
             history = keras.callbacks.History()
+            history.on_train_begin()
 
         # Loop over epochs
         for i in epoch_progress:
@@ -211,7 +274,7 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
                 fX = f(X)
 
                 # The Monte Carlo integrand is fX*J: we minimize its variance
-                loss = tf.math.reduce_var(fX*J)
+                loss = tf.math.reduce_variance(fX*J)
                 std = tf.math.sqrt(tf.stop_gradient(loss))
                 loss = tf.math.log(loss)
                 # Regularization losses are collected as we move forward in the model
@@ -219,7 +282,7 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
 
             # Compute and apply gradients
             grads = tape.gradient(loss, self.model.trainable_variables)
-            optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+            optimizer_object.apply_gradients(zip(grads, self.model.trainable_variables))
 
             # Update the progress bar
             if pretty_progressbar:
@@ -234,7 +297,7 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
                 tf.summary.scalar('loss', data=loss, step=i)
                 tf.summary.scalar('std',  data=std,  step=i)
 
-            if logging:
-                return history
+        if logging:
+            return history
 
 
