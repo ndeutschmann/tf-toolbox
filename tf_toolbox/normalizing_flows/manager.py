@@ -39,6 +39,7 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
 ):
         self.n_flow = n_flow
         self._model = None
+        self._inverse_model = None
 
         if n_pass_through_domain is None:
             _n_pass_through_domain = [1,n_flow-1]
@@ -88,6 +89,13 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
         else:
             raise AttributeError("No model was instantiated")
 
+    @property
+    def inverse_model(self):
+        if self._inverse_model is not None:
+            return self._inverse_model
+        else:
+            raise AttributeError("No inverse model was instantiated")
+
     format_input = AddJacobian()
 
     def create_model(self,*,
@@ -112,6 +120,80 @@ class RollingPWlinearNormalizingFlow(AM.ModelManager):
             )
             self._model.add(RollLayer(roll_step))
 
+        self._inverse_model = keras.Sequential([l.inverse for l in reversed(self._model.layers)])
 
+    def train_model(self, train_mode = "variance_forward", **train_opts):
+        """Training method that dispatches the model into the different training modes.
+        Training modes are implemented as methods named with the convention _train_{train_mode}
+        and are expected to return TODO
+        Currently implemented modes are
+            - variance_forward
+                options are (TODO)
+        """
+        try:
+            trainer = getattr(self,"_train_"+train_mode)
+        except AttributeError as error:
+            raise AttributeError("The train mode %s does not exist."%train_mode)
+
+        return trainer(**train_opts)
+
+    def _train_variance_forward(self, f, n_batch = 10000, n_epochs=10, *, optimizer, logging=True, log_tb=True, pretty_progressbar=True, **train_opts):
+        """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
+        (fixed latent space sample mapped to a phase space sample)
+        See notes equation TODO
+        """
+
+        # Instantiate a pretty launchbar if needed
+        if pretty_progressbar:
+            epoch_progress = tqdm(range(n_epochs),leave=False,desc="Loss: {0:.3e} | Epoch".format(0.))
+        else:
+            epoch_progress = range(n_epochs)
+
+        # Keep track of metric history if needed
+        if logging:
+            history = keras.callbacks.History()
+
+        # Loop over epochs
+        for i in epoch_progress:
+            with tf.GradientTape() as tape:
+                # Output a sample of (phase-space point, forward Jacobian)
+                XJ = self.model(                                            # Pass through the model
+                    self.format_input(                                      # Append a unit Jacobian to each point
+                        tf.random.uniform((n_batch, self.flow_size), 0, 1)  # Generate a batch of points in latent space
+                    )
+                )
+                # Separate the points and their Jacobians:
+                # This sample is fixed, we optimize the Jacobian
+                X = tf.stop_gradient(XJ[:,:-1])
+                # The Jacobian is the last entry of each point
+                J = XJ[:,-1]
+                # Apply function vlaues
+                fX = f(X)
+
+                # The Monte Carlo integrand is fX*J: we minimize its variance
+                loss = tf.math.reduce_var(fX*J)
+                std = tf.math.sqrt(tf.stop_gradient(loss))
+                loss = tf.math.log(loss)
+                # Regularization losses are collected as we move forward in the model
+                loss+=sum(self.model.losses)
+
+            # Compute and apply gradients
+            grads = tape.gradient(loss, self.model.trainable_variables)
+            optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+
+            # Update the progress bar
+            if pretty_progressbar:
+                epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
+
+            # Log the relevant data for internal use
+            if logging:
+                history.on_epoch_end(epoch=i,logs={"loss":loss.numpy(), "std":std.numpy()})
+
+            # Log the data in tensorboard
+            tf.summary.scalar('loss', data=loss, step=i)
+            tf.summary.scalar('std',data=std,step=i)
+
+            if logging:
+                return history
 
 
