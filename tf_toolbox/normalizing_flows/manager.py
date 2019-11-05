@@ -176,7 +176,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
 
         self.optimizer_object = optimizer_object
 
-    def train_model(self, train_mode = "variance_forward", n_batch = 10000, n_epochs=10, logging=True, log_tb=True,
+    def train_model(self, train_mode = "variance_forward", n_batch = 10000, epochs=10, epoch_start=0, logging=True, log_tb=True,
                     pretty_progressbar=True, *, f, logdir, hparam, **train_opts):
         """Training method that dispatches the model into the different training modes.
 
@@ -200,7 +200,8 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
             hparam (): tb.plugins.hparam.Hparam-keyed dict for hparam logging in tb. TODO add YAML logging w/o tb
             train_mode ():
             n_batch ():
-            n_epochs ():
+            epochs ():
+            epoch_start():
             pretty_progressbar ():
             optimizer ():
             **train_opts ():
@@ -218,14 +219,14 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         if log_tb:
             with tf.summary.create_file_writer(logdir).as_default():
                 hp.hparams(hparam)
-                return trainer(f, n_batch=n_batch, n_epochs=n_epochs, logging=logging, log_tb=log_tb,
-                    pretty_progressbar=pretty_progressbar, optimizer_object=self.optimizer_object, **train_opts)
+                return trainer(f, n_batch=n_batch, epochs=epochs, epoch_start=epoch_start, logging=logging, log_tb=log_tb,
+                               pretty_progressbar=pretty_progressbar, optimizer_object=self.optimizer_object, **train_opts)
         # Otherwise just start training
         else:
-            return trainer(f, n_batch=n_batch, n_epochs=n_epochs, logging=logging, log_tb=log_tb,
+            return trainer(f, n_batch=n_batch, epochs=epochs, epoch_start=epoch_start, logging=logging, log_tb=log_tb,
                            pretty_progressbar=pretty_progressbar, optimizer_object=self.optimizer_object, **train_opts)
 
-    def _train_variance_forward(self, f, n_batch = 10000, n_epochs=10, logging=True, log_tb=True,
+    def _train_variance_forward(self, f, n_batch = 10000, epochs=10, epoch_start=0, logging=True, log_tb=True,
                                 pretty_progressbar=True, *, optimizer_object, **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
@@ -234,7 +235,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         Args:
             f ():
             n_batch ():
-            n_epochs ():
+            epochs ():
             logging ():
             log_tb ():
             pretty_progressbar ():
@@ -247,9 +248,9 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
 
         # Instantiate a pretty launchbar if needed
         if pretty_progressbar:
-            epoch_progress = tqdm(range(n_epochs), leave=False, desc="Loss: {0:.3e} | Epoch".format(0.))
+            epoch_progress = tqdm(range(epoch_start,epoch_start+epochs), leave=False, desc="Loss: {0:.3e} | Epoch".format(0.))
         else:
-            epoch_progress = range(n_epochs)
+            epoch_progress = range(epoch_start, epoch_start+epochs)
 
         # Keep track of metric history if needed
         if logging:

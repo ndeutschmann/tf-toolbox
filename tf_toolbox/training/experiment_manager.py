@@ -25,13 +25,14 @@ class ExperimentManager:
         self.logdir = logdir
         self.run_name_template = run_name_template
         self.run_id = 0
+        self.epoch = 0
         # TODO  Have a full default behavior based on logdir/run_name_template_{id}_{timestamp}
         # TODO  and scan directory to initiate the id at (last value)+1
         # TODO  Alternative: save setup in logdir? pickle/yaml?
 
     def setup_tb(self):
-        with tf.summary.create_file_writer(logdir=self.logdir):
-            hp.hparams_config(hparams=self.hp_dict,metrics=self.model_manager.metrics)
+        with tf.summary.create_file_writer(self.logdir).as_default():
+            hp.hparams_config(hparams=self.hp_dict.values(),metrics=self.model_manager.metrics.values())
 
     def hp_dict_template(self):
         """Output a string that describes a dictionnary { hyperparameter1: X1, ... } with empty X1,
@@ -65,6 +66,7 @@ class ExperimentManager:
 
         self.run_id = run_id or self.run_id
         self.run_name = _full_run_name
+        self.epoch = 0
 
     def do_run(self,**run_opts):
         """Start a training run
@@ -77,8 +79,12 @@ class ExperimentManager:
         # The main reason for this class is this line below:
         # build a Hparam-keyed dictionnary for proper logging
         hparams_values = dict([(self.hp_dict[k],run_opts[k]) for k in self.hp_dict])
-        return self.model_manager.train_model(logdir=self.logdir+"/"+self.run_name,hparam=hparams_values,**run_opts)
+        print(hparams_values)
+        result = self.model_manager.train_model(logdir=self.logdir+"/"+self.run_name,hparam=hparams_values, epoch_start=self.epoch,**run_opts)
+        if "epochs" in run_opts:
+            self.epoch+=run_opts['epochs']
 
     def end_run(self):
         self.run_name = None
         self.run_id += 1
+        self.epoch = 0
