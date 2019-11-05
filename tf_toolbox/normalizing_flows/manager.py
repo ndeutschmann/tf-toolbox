@@ -3,7 +3,8 @@ import tensorflow.keras as keras
 import tensorboard.plugins.hparams.api as hp
 import tensorflow_probability as tfp
 from tqdm.autonotebook import tqdm
-from .layers import AddJacobian,PieceWiseLinear,RollLayer
+from tf_toolbox.training.misc import tqdm_recycled
+from .layers import AddJacobian, PieceWiseLinear, RollLayer
 import tf_toolbox.training.abstract_managers as AM
 
 class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
@@ -177,7 +178,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         self.optimizer_object = optimizer_object
 
     def train_model(self, train_mode = "variance_forward", n_batch = 10000, epochs=10, epoch_start=0, logging=True, log_tb=True,
-                    pretty_progressbar=True, *, f, logdir, hparam, **train_opts):
+                    pretty_progressbar=True, n_minibatches=1, *, f, logdir, hparam, **train_opts):
         """Training method that dispatches the model into the different training modes.
 
         Training modes are implemented as methods named with the convention _train_{train_mode}
@@ -220,14 +221,14 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
             with tf.summary.create_file_writer(logdir).as_default():
                 hp.hparams(hparam)
                 return trainer(f, n_batch=n_batch, epochs=epochs, epoch_start=epoch_start, logging=logging, log_tb=log_tb,
-                               pretty_progressbar=pretty_progressbar, optimizer_object=self.optimizer_object, **train_opts)
+                               pretty_progressbar=pretty_progressbar, n_minibatches=n_minibatches, optimizer_object=self.optimizer_object, **train_opts)
         # Otherwise just start training
         else:
             return trainer(f, n_batch=n_batch, epochs=epochs, epoch_start=epoch_start, logging=logging, log_tb=log_tb,
-                           pretty_progressbar=pretty_progressbar, optimizer_object=self.optimizer_object, **train_opts)
+                           pretty_progressbar=pretty_progressbar, n_minibatches=n_minibatches, optimizer_object=self.optimizer_object, **train_opts)
 
     def _train_variance_forward(self, f, n_batch = 10000, epochs=10, epoch_start=0, logging=True, log_tb=True,
-                                pretty_progressbar=True, *, optimizer_object, **train_opts):
+                                pretty_progressbar=True, n_minibatches=1, *, optimizer_object, **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
         See notes equation TODO
@@ -249,41 +250,63 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         # Instantiate a pretty launchbar if needed
         if pretty_progressbar:
             epoch_progress = tqdm(range(epoch_start,epoch_start+epochs), leave=False, desc="Loss: {0:.3e} | Epoch".format(0.))
+            if n_minibatches>1:
+                minibatch_progress = tqdm_recycled(range(n_minibatches), leave=False, desc="Step")
+            else:
+                minibatch_progress = range(n_minibatches)
+
         else:
             epoch_progress = range(epoch_start, epoch_start+epochs)
+            minibatch_progress = range(n_minibatches)
 
         # Keep track of metric history if needed
         if logging:
             history = keras.callbacks.History()
             history.on_train_begin()
 
+        assert n_minibatches>0,"n_minibatches must be strictly positive"
+        minibatch_size = int(n_batch/n_minibatches)
+
+        # Run the model once
+        self.model(  # Pass through the model
+            self.format_input(  # Append a unit Jacobian to each point
+                tf.random.uniform((minibatch_size, self.n_flow), 0, 1)  # Generate a batch of points in latent space
+            )
+        )
+        self.model.build((minibatch_size, self.n_flow+1))
+        variables = self.model.trainable_variables
+
         # Loop over epochs
         for i in epoch_progress:
-            with tf.GradientTape() as tape:
-                # Output a sample of (phase-space point, forward Jacobian)
-                XJ = self.model(                                            # Pass through the model
-                    self.format_input(                                      # Append a unit Jacobian to each point
-                        tf.random.uniform((n_batch, self.n_flow), 0, 1)  # Generate a batch of points in latent space
+            grads_cumul = [tf.zeros_like(variable) for variable in variables]
+            for j in minibatch_progress:
+                with tf.GradientTape() as tape:
+                    # Output a sample of (phase-space point, forward Jacobian)
+                    XJ = self.model(                                            # Pass through the model
+                        self.format_input(                                      # Append a unit Jacobian to each point
+                            tf.random.uniform((minibatch_size, self.n_flow), 0, 1)  # Generate a batch of points in latent space
+                        )
                     )
-                )
-                # Separate the points and their Jacobians:
-                # This sample is fixed, we optimize the Jacobian
-                X = tf.stop_gradient(XJ[:,:-1])
-                # The Jacobian is the last entry of each point
-                J = XJ[:,-1]
-                # Apply function values
-                fX = f(X)
+                    # Separate the points and their Jacobians:
+                    # This sample is fixed, we optimize the Jacobian
+                    X = tf.stop_gradient(XJ[:,:-1])
+                    # The Jacobian is the last entry of each point
+                    J = XJ[:,-1]
+                    # Apply function values
+                    fX = f(X)
 
-                # The Monte Carlo integrand is fX*J: we minimize its variance
-                loss = tf.math.reduce_variance(fX*J)
-                std = tf.math.sqrt(tf.stop_gradient(loss))
-                loss = tf.math.log(loss)
-                # Regularization losses are collected as we move forward in the model
-                loss += sum(self.model.losses)
+                    # The Monte Carlo integrand is fX*J: we minimize its variance
+                    loss = tf.math.reduce_variance(fX*J)
+                    std = tf.math.sqrt(tf.stop_gradient(loss))
+                    loss = tf.math.log(loss)
+                    # Regularization losses are collected as we move forward in the model
+                    loss += sum(self.model.losses)
 
-            # Compute and apply gradients
-            grads = tape.gradient(loss, self.model.trainable_variables)
-            optimizer_object.apply_gradients(zip(grads, self.model.trainable_variables))
+                # Compute and apply gradients
+                grads = tape.gradient(loss, self.model.trainable_variables)
+                grads_cumul = [grads[i]+grads_cumul[i] for i in range(len(grads))]
+            grads_cumul = [g/n_minibatches for g in grads_cumul]
+            optimizer_object.apply_gradients(zip(grads_cumul, self.model.trainable_variables))
 
             # Update the progress bar
             if pretty_progressbar:
@@ -297,7 +320,8 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
             if log_tb:
                 tf.summary.scalar('loss', data=loss, step=i)
                 tf.summary.scalar('std',  data=std,  step=i)
-
+        if isinstance(minibatch_progress,tqdm_recycled):
+            minibatch_progress.really_close()
         if logging:
             return history
 
