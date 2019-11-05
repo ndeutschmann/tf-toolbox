@@ -89,7 +89,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
 
             "nn_depth": hp.HParam("nn_depth", domain=hp.IntInterval(*nn_depth_domain),display_name="NN depth"),
 
-            "nn_activation": hp.HParam("nn_activation", domain=hp.Discrete(*nn_activation_domain),display_name="NN activ. fct."),
+            "nn_activation": hp.HParam("nn_activation", domain=hp.Discrete(nn_activation_domain),display_name="NN activ. fct."),
 
             "roll_step": hp.HParam("roll_step", domain=hp.IntInterval(*_roll_step_domain),display_name="Roll step"),
 

@@ -79,7 +79,7 @@ class ExperimentManager:
         # The main reason for this class is this line below:
         # build a Hparam-keyed dictionnary for proper logging
         hparams_values = dict([(self.hp_dict[k],run_opts[k]) for k in self.hp_dict])
-        print(hparams_values)
+
         result = self.model_manager.train_model(logdir=self.logdir+"/"+self.run_name,hparam=hparams_values, epoch_start=self.epoch,**run_opts)
         if "epochs" in run_opts:
             self.epoch+=run_opts['epochs']
