@@ -6,6 +6,7 @@ from tqdm.autonotebook import tqdm
 from tf_toolbox.training.misc import tqdm_recycled
 from .layers import AddJacobian, PieceWiseLinear, RollLayer
 import tf_toolbox.training.abstract_managers as AM
+import yaml
 
 class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
     """A manager for normalizing flows with piecewise linear coupling cells interleaved with rolling layers that
@@ -184,6 +185,34 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         self._inverse_model = keras.Sequential([l.inverse for l in reversed(self._model.layers)])
 
         self.optimizer_object = optimizer_object
+
+    def save_weights(self,*,logdir):
+        """Save the current weights"""
+        model_logdir = logdir+"/checkpoint/"
+        self.model.save_weights(model_logdir+"weights.h5")
+
+    def save_hparams(self, *, hparam, logdir):
+        """Save the hyperparameters that were used to instantiate and train this model"""
+        model_logdir = logdir+"/checkpoint/"
+        param_name_dict = [(h.name,val) for h,val in hparam.items()]
+        yaml.safe_dump(param_name_dict,model_logdir+"hparams.yaml")
+
+    def save_hparams_and_weights(self,*, hparam, logdir):
+        """Save the hyperparameters and the current weights"""
+        self.save_weights(logdir=logdir)
+        self.save_hparams(hparam=hparam,logdir=logdir)
+
+    def load_weights(self,weight_file_path):
+        """Load saved weights into an existing model"""
+        self.model.load_weights(weight_file_path)
+
+    def create_model_from_weights(self, checkpoint_path):
+        """Load the hyper parameters and weights from a model dump"""
+        with open(checkpoint_path + "/hparams.yaml", "r") as hparams_yaml:
+            hparams = yaml.load(hparams_yaml)
+        self.create_model(**hparams)
+        weight_file_path = checkpoint_path+"/weights.h5"
+        self.model.load_weights(weight_file_path)
 
     def train_model(self, train_mode = "variance_forward", n_batch = 10000, epochs=10, epoch_start=0, logging=True, log_tb=True,
                     pretty_progressbar=True, n_minibatches=1, *, f, logdir, hparam, **train_opts):
