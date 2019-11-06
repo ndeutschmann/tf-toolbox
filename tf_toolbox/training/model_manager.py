@@ -38,6 +38,11 @@ class ModelManager(ABC):
         """The currently instantiated model if it exists"""
         pass
 
+    @model.deleter
+    @abstractmethod
+    def model(self):
+        """Delete the current instantiated model"""
+
     @abstractmethod
     def train_model(self,**training_parameters):
         """Train a model using a given set of training parameters.

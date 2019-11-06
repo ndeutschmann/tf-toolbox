@@ -55,6 +55,10 @@ class ExperimentManager:
         Returns:
 
         """
+
+        if self.run_name is not None:
+            raise RuntimeError("Please terminate the current run before starting a new one")
+
         self.optimizer_manager.create_optimizer(**create_opts)
         self.model_manager.create_model(optimizer_object=self.optimizer_manager.optimizer,**create_opts)
 
@@ -76,6 +80,7 @@ class ExperimentManager:
         if self.run_name is None:
             raise RuntimeError("No run initialized")
 
+        print("Starting run "+self.run_name)
         # The main reason for this class is this line below:
         # build a Hparam-keyed dictionnary for proper logging
         hparams_values = dict([(self.hp_dict[k],run_opts[k]) for k in self.hp_dict])
