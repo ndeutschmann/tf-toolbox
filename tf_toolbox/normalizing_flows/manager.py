@@ -214,8 +214,9 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         weight_file_path = checkpoint_path+"/weights.h5"
         self.model.load_weights(weight_file_path)
 
-    def train_model(self, train_mode = "variance_forward", n_batch = 10000, epochs=10, epoch_start=0, logging=True, log_tb=True,
-                    pretty_progressbar=True, n_minibatches=1, *, f, logdir, hparam, **train_opts):
+    def train_model(self, train_mode = "variance_forward", n_batch = 10000, n_minibatches=1, epochs=10, epoch_start=0,
+                    logging=True, log_tb=True, pretty_progressbar=True, save_best = True,
+                    *, f, logdir, hparam, **train_opts):
         """Training method that dispatches the model into the different training modes.
 
         Training modes are implemented as methods named with the convention _train_{train_mode}
@@ -224,11 +225,6 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
             * variance_forward
                 specific options are (TODO)
             * TODO
-
-        Note:
-            * signature
-            train_model(train_mode = "variance_forward", n_batch = 10000, n_epochs=10, logging=True, log_tb=True,
-                    pretty_progressbar=True, *, f, optimizer, logdir, hparam)
 
         Args:
             f (): function to train on
@@ -241,7 +237,8 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
             epochs ():
             epoch_start():
             pretty_progressbar ():
-            optimizer ():
+            n_minibatches ():
+            save_best():
             **train_opts ():
 
         Returns:
@@ -253,19 +250,26 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         except AttributeError as error:
             raise AttributeError("The train mode %s does not exist."%train_mode)
 
-        # if we use tensorboard, log the Hyperparameter values and start training
+        # if we save a checkpoint for the best model in training history, initialize the checkpoint
+        if save_best:
+            self.save_hparams_and_weights(hparam=hparam,logdir=logdir)
+
+        # if we use tensorboard, wrap the run in a file writer
         if log_tb:
             with tf.summary.create_file_writer(logdir).as_default():
                 hp.hparams(hparam)
-                return trainer(f, n_batch=n_batch, epochs=epochs, epoch_start=epoch_start, logging=logging, log_tb=log_tb,
-                               pretty_progressbar=pretty_progressbar, n_minibatches=n_minibatches, optimizer_object=self.optimizer_object, **train_opts)
+                return trainer(f, n_batch=n_batch, n_minibatches=n_minibatches, epochs=epochs, epoch_start=epoch_start,
+                               logging=logging, log_tb=log_tb, pretty_progressbar=pretty_progressbar,
+                               optimizer_object=self.optimizer_object, save_best=save_best, logdir=logdir, **train_opts)
         # Otherwise just start training
         else:
-            return trainer(f, n_batch=n_batch, epochs=epochs, epoch_start=epoch_start, logging=logging, log_tb=log_tb,
-                           pretty_progressbar=pretty_progressbar, n_minibatches=n_minibatches, optimizer_object=self.optimizer_object, **train_opts)
+            return trainer(f, n_batch=n_batch, n_minibatches=n_minibatches, epochs=epochs, epoch_start=epoch_start,
+                           logging=logging, log_tb=log_tb, pretty_progressbar=pretty_progressbar,
+                           optimizer_object=self.optimizer_object, save_best=save_best, logdir=logdir, **train_opts)
 
-    def _train_variance_forward(self, f, n_batch = 10000, epochs=10, epoch_start=0, logging=True, log_tb=True,
-                                pretty_progressbar=True, n_minibatches=1, *, optimizer_object, **train_opts):
+    def _train_variance_forward(self, f, n_batch = 10000, n_minibatches=1, epochs=10, epoch_start=0,
+                                logging=True, log_tb=True, pretty_progressbar=True, save_best=True,
+                                *, optimizer_object, logdir, **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
         See notes equation TODO
@@ -278,6 +282,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
             log_tb ():
             pretty_progressbar ():
             optimizer ():
+            save_best():
             **train_opts ():
 
         Returns:
@@ -305,17 +310,25 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         minibatch_size = int(n_batch/n_minibatches)
 
         # Run the model once
-        self.model(  # Pass through the model
+        XJ = self.model(  # Pass through the model
             self.format_input(  # Append a unit Jacobian to each point
                 tf.random.uniform((minibatch_size, self.n_flow), 0, 1)  # Generate a batch of points in latent space
             )
         )
+        # Initialize tracking for checkpoints
+        if save_best:
+            fX = f(XJ[:,:-1])
+            J = XJ[:,-1]
+            best_std = tf.math.reduce_std(fX*J)
+
         self.model.build((minibatch_size, self.n_flow+1))
         variables = self.model.trainable_variables
 
         # Loop over epochs
         for i in epoch_progress:
             grads_cumul = [tf.zeros_like(variable) for variable in variables]
+            loss_cumul = 0
+            std_cumul = 0
             for j in minibatch_progress:
                 with tf.GradientTape() as tape:
                     # Output a sample of (phase-space point, forward Jacobian)
@@ -342,21 +355,30 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
                 # Compute and apply gradients
                 grads = tape.gradient(loss, self.model.trainable_variables)
                 grads_cumul = [grads[i]+grads_cumul[i] for i in range(len(grads))]
+                loss_cumul += loss
+                std_cumul += std
             grads_cumul = [g/n_minibatches for g in grads_cumul]
+            loss_cumul /= n_minibatches
+            std_cumul /= n_minibatches
             optimizer_object.apply_gradients(zip(grads_cumul, self.model.trainable_variables))
 
             # Update the progress bar
             if pretty_progressbar:
-                epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss))
+                epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss_cumul))
 
             # Log the relevant data for internal use
             if logging:
-                history.on_epoch_end(epoch=i,logs={"loss":loss.numpy(), "std":std.numpy()})
+                history.on_epoch_end(epoch=i,logs={"loss":loss_cumul.numpy(), "std":std_cumul.numpy()})
 
             # Log the data in tensorboard
             if log_tb:
-                tf.summary.scalar('loss', data=loss, step=i)
-                tf.summary.scalar('std',  data=std,  step=i)
+                tf.summary.scalar('loss', data=loss_cumul, step=i)
+                tf.summary.scalar('std',  data=std_cumul,  step=i)
+
+            if save_best and std_cumul< 0.9 * best_std:
+                best_std = std_cumul
+                self.save_weights(logdir=logdir)
+
         if isinstance(minibatch_progress,tqdm_recycled):
             minibatch_progress.really_close()
         if logging:
