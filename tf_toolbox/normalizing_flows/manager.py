@@ -122,6 +122,14 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         else:
             raise AttributeError("No model was instantiated")
 
+    @model.deleter
+    def model(self):
+        if self._model is not None:
+            del self._model
+            self._model = None
+        else:
+            raise AttributeError("No model was instantiated")
+
     @property
     def inverse_model(self):
         if self._inverse_model is not None:
