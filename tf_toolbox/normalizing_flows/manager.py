@@ -6,6 +6,7 @@ from tf_toolbox.training.misc import tqdm_recycled
 from .layers import AddJacobian, PieceWiseLinear, RollLayer
 import tf_toolbox.training.abstract_managers as AM
 import yaml
+import os
 
 class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
     """A manager for normalizing flows with piecewise linear coupling cells interleaved with rolling layers that
@@ -188,30 +189,33 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
     def save_weights(self,*,logdir):
         """Save the current weights"""
         model_logdir = logdir+"/checkpoint/"
-        self.model.save_weights(model_logdir+"weights.h5")
+        filename = model_logdir+"weights.h5"
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        self.model.save_weights(filename)
 
     def save_hparams(self, *, hparam, logdir):
         """Save the hyperparameters that were used to instantiate and train this model"""
+        param_name_dict = dict([(h.name,val) for h,val in hparam.items()])
         model_logdir = logdir+"/checkpoint/"
-        param_name_dict = [(h.name,val) for h,val in hparam.items()]
-        yaml.safe_dump(param_name_dict,model_logdir+"hparams.yaml")
+        filename = model_logdir+"hparams.yaml"
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, "w+") as hparams_yaml:
+            yaml.safe_dump(param_name_dict,stream=hparams_yaml)
 
     def save_hparams_and_weights(self,*, hparam, logdir):
         """Save the hyperparameters and the current weights"""
         self.save_weights(logdir=logdir)
         self.save_hparams(hparam=hparam,logdir=logdir)
 
-    def load_weights(self,weight_file_path):
+    def load_weights(self,checkpoint_path):
         """Load saved weights into an existing model"""
-        self.model.load_weights(weight_file_path)
+        self.model.load_weights(checkpoint_path + "weights.h5")
 
-    def create_model_from_weights(self, checkpoint_path):
-        """Load the hyper parameters and weights from a model dump"""
+    def create_model_from_hparams(self, checkpoint_path, *, optimizer_object):
+        """Load the hyper parameters from a model dump"""
         with open(checkpoint_path + "/hparams.yaml", "r") as hparams_yaml:
             hparams = yaml.load(hparams_yaml)
-        self.create_model(**hparams)
-        weight_file_path = checkpoint_path+"/weights.h5"
-        self.model.load_weights(weight_file_path)
+        self.create_model(optimizer_object=optimizer_object, **hparams)
 
     def train_model(self, train_mode = "variance_forward", n_batch = 10000, n_minibatches=1, epochs=10, epoch_start=0,
                     logging=True, log_tb=True, pretty_progressbar=True, save_best = True,
@@ -249,9 +253,9 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         except AttributeError as error:
             raise AttributeError("The train mode %s does not exist."%train_mode)
 
-        # if we save a checkpoint for the best model in training history, initialize the checkpoint
+        # if we save a checkpoint for the best model in training history, initialize the checkpoint and log the hparams
         if save_best:
-            self.save_hparams_and_weights(hparam=hparam,logdir=logdir)
+            self.save_hparams(hparam=hparam,logdir=logdir)
 
         # if we use tensorboard, wrap the run in a file writer
         if log_tb:
@@ -374,7 +378,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
                 tf.summary.scalar('loss', data=loss_cumul, step=i)
                 tf.summary.scalar('std',  data=std_cumul,  step=i)
 
-            if save_best and std_cumul< 0.9 * best_std:
+            if save_best and std_cumul < best_std:
                 best_std = std_cumul
                 self.save_weights(logdir=logdir)
 
