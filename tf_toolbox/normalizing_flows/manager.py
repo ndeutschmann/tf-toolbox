@@ -1,7 +1,6 @@
 import tensorflow as tf
 import tensorflow.keras as keras
 import tensorboard.plugins.hparams.api as hp
-import tensorflow_probability as tfp
 from tqdm.autonotebook import tqdm
 from tf_toolbox.training.misc import tqdm_recycled
 from .layers import AddJacobian, PieceWiseLinear, RollLayer
