@@ -88,8 +88,10 @@ class ExperimentManager:
         result = self.model_manager.train_model(logdir=self.logdir+"/"+self.run_name,hparam=hparams_values, epoch_start=self.epoch,**run_opts)
         if "epochs" in run_opts:
             self.epoch+=run_opts['epochs']
+        return result
 
     def end_run(self):
         self.run_name = None
         self.run_id += 1
         self.epoch = 0
+        del self.model_manager.model
