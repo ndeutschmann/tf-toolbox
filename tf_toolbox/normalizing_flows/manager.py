@@ -186,6 +186,13 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
 
         self.optimizer_object = optimizer_object
 
+        # Do one pass forward:
+        self._model(
+            self.format_input(
+                tf.random.uniform((1,self.n_flow),0.,1.)
+            )
+        )
+
     def save_weights(self,*,logdir):
         """Save the current weights"""
         model_logdir = logdir+"/checkpoint/"
@@ -209,13 +216,14 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
 
     def load_weights(self,checkpoint_path):
         """Load saved weights into an existing model"""
-        self.model.load_weights(checkpoint_path + "weights.h5")
+        self.model.load_weights(checkpoint_path + "/weights.h5")
 
-    def create_model_from_hparams(self, checkpoint_path, *, optimizer_object):
+    def create_model_from_hparams_and_weights(self, checkpoint_path, *, optimizer_object):
         """Load the hyper parameters from a model dump"""
         with open(checkpoint_path + "/hparams.yaml", "r") as hparams_yaml:
-            hparams = yaml.load(hparams_yaml)
+            hparams = yaml.load(hparams_yaml, Loader=yaml.FullLoader)
         self.create_model(optimizer_object=optimizer_object, **hparams)
+        self.load_weights(checkpoint_path)
 
     def train_model(self, train_mode = "variance_forward", n_batch = 10000, n_minibatches=1, epochs=10, epoch_start=0,
                     logging=True, log_tb=True, pretty_progressbar=True, save_best = True,
@@ -255,7 +263,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
 
         # if we save a checkpoint for the best model in training history, initialize the checkpoint and log the hparams
         if save_best:
-            self.save_hparams(hparam=hparam,logdir=logdir)
+            self.save_hparams_and_weights(hparam=hparam,logdir=logdir)
 
         # if we use tensorboard, wrap the run in a file writer
         if log_tb:
