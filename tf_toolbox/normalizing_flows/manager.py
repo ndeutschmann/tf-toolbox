@@ -195,16 +195,14 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
 
     def save_weights(self,*,logdir):
         """Save the current weights"""
-        model_logdir = logdir+"/checkpoint/"
-        filename = model_logdir+"weights.h5"
+        filename = os.path.join(logdir,"checkpoint","weights.h5")
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         self.model.save_weights(filename)
 
     def save_hparams(self, *, hparam, logdir):
         """Save the hyperparameters that were used to instantiate and train this model"""
         param_name_dict = dict([(h.name,val) for h,val in hparam.items()])
-        model_logdir = logdir+"/checkpoint/"
-        filename = model_logdir+"hparams.yaml"
+        filename = os.path.join(logdir,"checkpoint","hparams.yaml")
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, "w+") as hparams_yaml:
             yaml.safe_dump(param_name_dict,stream=hparams_yaml)
@@ -216,11 +214,13 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
 
     def load_weights(self,checkpoint_path):
         """Load saved weights into an existing model"""
-        self.model.load_weights(checkpoint_path + "/weights.h5")
+        filename = os.path.join(checkpoint_path,"weights.h5")
+        self.model.load_weights(filename)
 
     def create_model_from_hparams_and_weights(self, checkpoint_path, *, optimizer_object):
         """Load the hyper parameters from a model dump"""
-        with open(checkpoint_path + "/hparams.yaml", "r") as hparams_yaml:
+        filename = os.path.join(checkpoint_path,"hparams.yaml")
+        with open(filename, "r") as hparams_yaml:
             hparams = yaml.load(hparams_yaml, Loader=yaml.FullLoader)
         self.create_model(optimizer_object=optimizer_object, **hparams)
         self.load_weights(checkpoint_path)

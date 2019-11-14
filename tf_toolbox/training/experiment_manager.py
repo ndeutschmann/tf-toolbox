@@ -3,6 +3,7 @@ from .optimizer_manager import OptimizerManager
 from time import time
 import tensorboard.plugins.hparams.api as hp
 import tensorflow as tf
+import os
 
 class ExperimentManager:
     """A manager class for overall experiments
@@ -26,9 +27,9 @@ class ExperimentManager:
         self.run_name_template = run_name_template
         self.run_id = 0
         self.epoch = 0
-        # TODO  Have a full default behavior based on logdir/run_name_template_{id}_{timestamp}
+        # TODO  Have a full default behavior based on logdir/run_name_template_{id}_{timestamp} DONE
         # TODO  and scan directory to initiate the id at (last value)+1
-        # TODO  Alternative: save setup in logdir? pickle/yaml?
+        # TODO  Alternative: save setup in logdir? pickle/yaml? DONE
 
     def setup_tb(self):
         with tf.summary.create_file_writer(self.logdir).as_default():
@@ -85,7 +86,9 @@ class ExperimentManager:
         # build a Hparam-keyed dictionnary for proper logging
         hparams_values = dict([(self.hp_dict[k],run_opts[k]) for k in self.hp_dict])
 
-        result = self.model_manager.train_model(logdir=self.logdir+"/"+self.run_name,hparam=hparams_values, epoch_start=self.epoch,**run_opts)
+        run_logdir = os.path.join(self.logdir,self.run_name)
+
+        result = self.model_manager.train_model(logdir=run_logdir, hparam=hparams_values, epoch_start=self.epoch,**run_opts)
         if "epochs" in run_opts:
             self.epoch+=run_opts['epochs']
         return result
