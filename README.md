@@ -1,6 +1,10 @@
 # tf-toolbox
 
-My library of ML tools developped as I learn it.
+My library of tensorflow tools
+
+## Normalizing flows
+
+The normalizing_flow module implements normalizing flows with piecewise linear layers. [Here](https://ndeutschmann.github.io/tf-toolbox/nf_note.html) is a description of how they work and application examples.
 
 ## Autoencoders
 
@@ -8,7 +12,7 @@ My library of ML tools developped as I learn it.
 
 ### DenseLayeredAutoencoder
 
-An autoencoder built from a sequence of dense layers. [Here](https://ndeutschmann.github.io/tf-toolbox/dense_autoencoder.html) is an example  using the MNIST dataset and trying to use it as a generator.
+An autoencoder built from a sequence of dense layers. [Here](https://ndeutschmann.github.io/tf-toolbox/dense_autoencoder.html) is an example  using the MNIST dataset and trying to use it as a generator using basic tricks.
 
 
 ## LICENSE
