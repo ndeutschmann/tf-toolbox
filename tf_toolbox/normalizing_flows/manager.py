@@ -37,7 +37,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
                  roll_step_domain = None,
                  l2_reg_domain = (0.,1.),
                  dropout_rate_domain = (0.,1.),
-                 n_batch_domain = (100,1000000),
+                 batch_size_domain = (100,1000000),
                  **init_opts
 ):
         """
@@ -53,7 +53,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
             roll_step_domain ():
             l2_reg_domain ():
             dropout_rate_domain ():
-            n_batch_domain ():
+            batch_size_domain ():
             **init_opts ():
         """
         self.n_flow = n_flow
@@ -79,7 +79,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         # And batch statistics has an impact on convergence
         # Pedagogical note: a contrario if we divide this sample into N minibatches and accumulate the gradients
         # before taking an optimizer step (typically for memory reasons)
-        # TODO implement minibatches
+
         self._hparam = {
             "n_pass_through": hp.HParam("n_pass_through", domain=hp.IntInterval(*_n_pass_through_domain),display_name="# Pass"),
 
@@ -99,8 +99,8 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
 
             "dropout_rate": hp.HParam("dropout_rate", domain=hp.RealInterval(*dropout_rate_domain),display_name="Dropout rate"),
 
-            "n_batch": hp.HParam("n_batch", domain=hp.IntInterval(*n_batch_domain),
-                                      display_name="# Batch points"),
+            "batch_size": hp.HParam("batch_size", domain=hp.IntInterval(*batch_size_domain),
+                                      display_name="Batch size"),
 
         }
 
@@ -225,7 +225,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         self.create_model(optimizer_object=optimizer_object, **hparams)
         self.load_weights(checkpoint_path)
 
-    def train_model(self, train_mode = "variance_forward", n_batch = 10000, n_minibatches=1, epochs=10, epoch_start=0,
+    def train_model(self, train_mode = "variance_forward", batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
                     logging=True, log_tb=True, pretty_progressbar=True, save_best = True,
                     *, f, logdir, hparam, **train_opts):
         """Training method that dispatches the model into the different training modes.
@@ -244,11 +244,11 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
             logdir (): where to log tb data
             hparam (): tb.plugins.hparam.Hparam-keyed dict for hparam logging in tb. TODO add YAML logging w/o tb
             train_mode ():
-            n_batch ():
+            batch_size ():
             epochs ():
             epoch_start():
             pretty_progressbar ():
-            n_minibatches ():
+            minibatch_size ():
             save_best():
             **train_opts ():
 
@@ -269,16 +269,16 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         if log_tb:
             with tf.summary.create_file_writer(logdir).as_default():
                 hp.hparams(hparam)
-                return trainer(f, n_batch=n_batch, n_minibatches=n_minibatches, epochs=epochs, epoch_start=epoch_start,
+                return trainer(f, batch_size=batch_size, minibatch_size=minibatch_size, epochs=epochs, epoch_start=epoch_start,
                                logging=logging, log_tb=log_tb, pretty_progressbar=pretty_progressbar,
                                optimizer_object=self.optimizer_object, save_best=save_best, logdir=logdir, **train_opts)
         # Otherwise just start training
         else:
-            return trainer(f, n_batch=n_batch, n_minibatches=n_minibatches, epochs=epochs, epoch_start=epoch_start,
+            return trainer(f, batch_size=batch_size, minibatch_size=minibatch_size, epochs=epochs, epoch_start=epoch_start,
                            logging=logging, log_tb=log_tb, pretty_progressbar=pretty_progressbar,
                            optimizer_object=self.optimizer_object, save_best=save_best, logdir=logdir, **train_opts)
 
-    def _train_variance_forward(self, f, n_batch = 10000, n_minibatches=1, epochs=10, epoch_start=0,
+    def _train_variance_forward(self, f, batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
                                 logging=True, log_tb=True, pretty_progressbar=True, save_best=True,
                                 *, optimizer_object, logdir, **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
@@ -287,22 +287,30 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
 
         Args:
             f ():
-            n_batch ():
+            batch_size ():
+            minibatch_size():
             epochs ():
+            epoch_start ():
             logging ():
             log_tb ():
             pretty_progressbar ():
-            optimizer ():
-            save_best():
+            optimizer_object ():
+            save_best ():
+            logdir ():
             **train_opts ():
 
         Returns:
 
         """
 
-        # Instantiate a pretty launchbar if needed
+        # Minibatch logic
+        assert minibatch_size<batch_size, "The minibatch size must be smaller than the batch size"
+        n_minibatches = int(batch_size/minibatch_size)
+
+        # Instantiate a pretty progress bar if needed
         if pretty_progressbar:
             epoch_progress = tqdm(range(epoch_start,epoch_start+epochs), leave=False, desc="Loss: {0:.3e} | Epoch".format(0.))
+            # Instantiate a pretty progress bar for the minibatch loop if it is not trivial
             if n_minibatches>1:
                 minibatch_progress = tqdm_recycled(range(n_minibatches), leave=False, desc="Step")
             else:
@@ -316,9 +324,6 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         if logging:
             history = keras.callbacks.History()
             history.on_train_begin()
-
-        assert n_minibatches>0,"n_minibatches must be strictly positive"
-        minibatch_size = int(n_batch/n_minibatches)
 
         # Run the model once
         XJ = self.model(  # Pass through the model
@@ -368,7 +373,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
                 grads_cumul = [grads[i]+grads_cumul[i] for i in range(len(grads))]
                 loss_cumul += loss
                 std_cumul += std
-            grads_cumul = [g/n_minibatches for g in grads_cumul]
+            grads_cumul = [g / minibatch_size for g in grads_cumul]
             loss_cumul /= n_minibatches
             std_cumul /= n_minibatches
             optimizer_object.apply_gradients(zip(grads_cumul, self.model.trainable_variables))
