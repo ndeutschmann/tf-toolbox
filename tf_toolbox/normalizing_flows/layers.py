@@ -42,7 +42,7 @@ class AddJacobian(keras.layers.Layer):
 # WIP
 class PieceWiseLinear(keras.layers.Layer):
     def __init__(self, flow_size, pass_through_size, n_bins=10, nn_layers=[], reg=0., dropout=0.,
-                 final_activation="sigmoid"):
+                 final_activation="exponential"):
         super(PieceWiseLinear, self).__init__()
         self.pass_through_size = pass_through_size
         self.flow_size = flow_size
