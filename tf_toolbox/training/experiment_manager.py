@@ -27,9 +27,6 @@ class ExperimentManager:
         self.run_name_template = run_name_template
         self.run_id = 0
         self.epoch = 0
-        # TODO  Have a full default behavior based on logdir/run_name_template_{id}_{timestamp} DONE
-        # TODO  and scan directory to initiate the id at (last value)+1
-        # TODO  Alternative: save setup in logdir? pickle/yaml? DONE
 
     def setup_tb(self):
         with tf.summary.create_file_writer(self.logdir).as_default():

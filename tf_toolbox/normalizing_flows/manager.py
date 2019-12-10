@@ -195,14 +195,14 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
 
     def save_weights(self,*,logdir):
         """Save the current weights"""
-        filename = os.path.join(logdir,"checkpoint","weights.h5")
+        filename = os.path.join(logdir,"model_checkpoint","weights.h5")
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         self.model.save_weights(filename)
 
     def save_hparams(self, *, hparam, logdir):
         """Save the hyperparameters that were used to instantiate and train this model"""
         param_name_dict = dict([(h.name,val) for h,val in hparam.items()])
-        filename = os.path.join(logdir,"checkpoint","hparams.yaml")
+        filename = os.path.join(logdir,"model_checkpoint","hparams.yaml")
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, "w+") as hparams_yaml:
             yaml.safe_dump(param_name_dict,stream=hparams_yaml)
@@ -212,18 +212,30 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         self.save_weights(logdir=logdir)
         self.save_hparams(hparam=hparam,logdir=logdir)
 
-    def load_weights(self,checkpoint_path):
+    def load_weights(self,weight_file_path):
         """Load saved weights into an existing model"""
-        filename = os.path.join(checkpoint_path,"weights.h5")
-        self.model.load_weights(filename)
+        self.model.load_weights(weight_file_path)
 
-    def create_model_from_hparams_and_weights(self, checkpoint_path, *, optimizer_object):
-        """Load the hyper parameters from a model dump"""
-        filename = os.path.join(checkpoint_path,"hparams.yaml")
-        with open(filename, "r") as hparams_yaml:
+    def load_weights_from_checkpoint(self, checkpoint_path):
+        """Load saved weights from a checkpoint directory into an existing model"""
+        filename = os.path.join(checkpoint_path,"weights.h5")
+        self.load_weights(filename)
+
+    def create_model_from_hparams(self, hparams_yaml_path, *, optimizer_object):
+        """Create a model from a YAML hyperparameter file and an optimizer"""
+        with open(hparams_yaml_path, "r") as hparams_yaml:
             hparams = yaml.load(hparams_yaml, Loader=yaml.FullLoader)
         self.create_model(optimizer_object=optimizer_object, **hparams)
-        self.load_weights(checkpoint_path)
+
+    def create_model_from_checkpoint(self ,checkpoint_path, *, optimizer_object):
+        """Create a model from the hyperparameters of a checkpoint and an optimizer"""
+        hparams_yaml_path = os.path.join(checkpoint_path, "hparams.yaml")
+        self.create_model_from_hparams(hparams_yaml_path, optimizer_object=optimizer_object)
+
+    def load_model_from_checkpoint(self, checkpoint_path, *, optimizer_object):
+        """Create and load a pre-trained model from a checkpoint"""
+        self.create_model_from_checkpoint(checkpoint_path,optimizer_object=optimizer_object)
+        self.load_weights_from_checkpoint(checkpoint_path)
 
     def train_model(self, train_mode = "variance_forward", batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
                     logging=True, log_tb=True, pretty_progressbar=True, save_best = True,
