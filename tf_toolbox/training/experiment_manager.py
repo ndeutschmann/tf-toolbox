@@ -9,7 +9,7 @@ class ExperimentManager:
     """A manager class for overall experiments
     This class provides the higher level interface to models and optimizers and is supposed to serve as framework
     to make training and scans smooth across different settings."""
-    def __init__(self,model_manager:ModelManager,optimizer_manager:OptimizerManager,*,logdir,run_name_template="run"):
+    def __init__(self,model_manager:ModelManager,optimizer_manager:OptimizerManager,*,logdir,run_name_template="run", log_names=True):
         """
 
         Args:
@@ -22,6 +22,13 @@ class ExperimentManager:
         self.optimizer_manager = optimizer_manager
 
         self.hp_dict = dict(model_manager.hparam, **optimizer_manager.hparam)
+
+        # Logging the run name makes it easier to match the Scalars page to the HParams page
+        # However it can overcrowd the Hparams page when repeating the same experiment so optionally turn it off.
+        self.log_names = log_names
+        if log_names:
+            self.hp_dict.update({"run_name": hp.HParam('run_name',display_name="Run name")})
+
         self.run_name = None
         self.logdir = logdir
         self.run_name_template = run_name_template
@@ -78,11 +85,16 @@ class ExperimentManager:
         if self.run_name is None:
             raise RuntimeError("No run initialized")
 
+        # Logging the run name as a Hparam if the options was set to True (see __init__ for rationale)
+        # TODO This is not a nice implementation of run name storing.
+        assert "run_name" not in run_opts, "run_name is a reserved keyword. Run names are managed internally"
+        if self.log_names:
+            run_opts["run_name"] = self.run_name
+
         print("Starting run "+self.run_name)
         # The main reason for this class is this line below:
         # build a Hparam-keyed dictionnary for proper logging
         hparams_values = dict([(self.hp_dict[k],run_opts[k]) for k in self.hp_dict])
-
         run_logdir = os.path.join(self.logdir,self.run_name)
 
         result = self.model_manager.train_model(logdir=run_logdir, hparam=hparams_values, epoch_start=self.epoch,**run_opts)
