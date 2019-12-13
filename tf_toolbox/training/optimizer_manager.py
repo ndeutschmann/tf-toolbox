@@ -1,5 +1,5 @@
 from abc import ABC,abstractmethod,abstractproperty
-from tensorflow.keras.optimizers import SGD,Adam,Adamax
+from tensorflow.keras.optimizers import SGD,Adam,Adamax, RMSprop
 import tensorboard.plugins.hparams.api as hp
 
 class OptimizerManager(ABC):
@@ -31,21 +31,10 @@ class OptimizerManager(ABC):
         """The currently instantiated optimizer if it exists"""
         pass
 
+class StandardManager(OptimizerManager):
+    """Second layer of meta class that implements generic access to optimizer and hparam"""
 
-class SGDManager(OptimizerManager):
-    """A Manager class for the vanilla SGD optimizer"""
-
-    def __init__(self, lr_range = (1.e-8,1.)):
-        """Create a SGD manager with a specific learning rate range"""
-        self._hparam = {
-            "optimizer": hp.HParam("optimizer",
-                                       domain=hp.Discrete(['naive SGD']),
-                                       display_name="Optimizer"),
-            "learning_rate": hp.HParam("learning_rate",
-                                       domain=hp.RealInterval(*lr_range),
-                                       display_name="Learning rate"),
-        }
-
+    def __init__(self):
         self._optimizer = None
 
     @property
@@ -59,11 +48,43 @@ class SGDManager(OptimizerManager):
         else:
             raise AttributeError("No optimizer was instantiated")
 
+class SGDManager(StandardManager):
+    """A Manager class for the vanilla SGD optimizer"""
+
+    def __init__(self, lr_range = (1.e-8,1.)):
+        """Create a SGD manager with a specific learning rate range"""
+        super(SGDManager, self).__init__()
+        self._hparam = {
+            "optimizer": hp.HParam("optimizer",
+                                       domain=hp.Discrete(['SGD']),
+                                       display_name="Optimizer"),
+            "learning_rate": hp.HParam("learning_rate",
+                                       domain=hp.RealInterval(*lr_range),
+                                       display_name="Learning rate"),
+        }
+
     def create_optimizer(self, learning_rate=0.01, **opts):
         self._optimizer = SGD(learning_rate=learning_rate)
 
+class SGDMomentumManager(SGDManager):
+    """A Manager class for the momentum(possibly Nesterov) SGD optimizer"""
 
-class AdamManager(OptimizerManager):
+    # How to map the hyperparameter label to an argument of the keras SGD constructor
+    nesterov_map = {
+        "standard": False,
+        "nesterov": True
+    }
+
+    def __init__(self, lr_range = (1.e-8,1.), momentum_range = (0.,1.)):
+        super(SGDMomentumManager, self).__init__(lr_range=lr_range)
+        self._hparam['momentum'] = hp.HParam('momentum',description="Momentum Rate",domain=hp.RealInterval(*momentum_range))
+        self._hparam['nesterov'] = hp.HParam('nesterov',description="Momentum",domain=hp.Discrete(['standard','nesterov']))
+
+    def create_optimizer(self, learning_rate=0.01, momentum=0., nesterov='standard', **opts):
+        self._optimizer = SGD(learning_rate=learning_rate, momentum=momentum, nesterov=self.nesterov_map[nesterov])
+
+
+class AdamManager(StandardManager):
     """An optimizer for the Adam/Amsgrad/Adamax optimizer"""
 
     def __init__(self,
@@ -80,6 +101,7 @@ class AdamManager(OptimizerManager):
             beta_2_range ():
             epsilon_range ():
         """
+        super(AdamManager, self).__init__()
         self._hparam = {
             "optimizer": hp.HParam("optimizer",
                                        domain=hp.Discrete(['Adam','Amsgrad','Adamax']),
@@ -97,19 +119,6 @@ class AdamManager(OptimizerManager):
                                        domain=hp.RealInterval(*epsilon_range),
                                        display_name="Epsilon"),
         }
-
-        self._optimizer = None
-
-    @property
-    def hparam(self):
-        return self._hparam
-
-    @property
-    def optimizer(self):
-        if self._optimizer is not None:
-            return self._optimizer
-        else:
-            raise AttributeError("No optimizer was instantiated")
 
     def create_optimizer(self,
                          optimizer="Adam",
@@ -154,3 +163,35 @@ class AdamManager(OptimizerManager):
 
         else:
             raise ValueError("Unknown optimizer mode for AdamXManager: {}".format(optimizer))
+
+class RMSpropManager(StandardManager):
+    """Manager for the RMSprop optimizer"""
+
+    def __init__(self, lr_range=(1.e-8,1.e8), rho_range = (0.,1.), momentum_range = (0., 1.), epsilon_range = (0.,1.) ):
+        super(RMSpropManager, self).__init__()
+        self._hparam = {
+            "optimizer": hp.HParam("optimizer",
+                                   domain=hp.Discrete(['RMSProp']),
+                                   display_name="Optimizer"),
+            "learning_rate": hp.HParam("learning_rate",
+                                       domain=hp.RealInterval(*lr_range),
+                                       display_name="Learning rate"),
+            "rho": hp.HParam("rho",
+                                       domain=hp.RealInterval(*rho_range),
+                                       display_name="Rho"),
+            "momentum": hp.HParam("momentum",
+                                       domain=hp.RealInterval(*momentum_range),
+                                       display_name="Momentum rate"),
+            "epsilon": hp.HParam("epsilon",
+                                  domain=hp.RealInterval(*epsilon_range),
+                                  display_name="Epsilon"),
+        }
+
+    def create_optimizer(self,
+                         learning_rate=0.001,
+                         rho=0.9,
+                         momentum=0.0,
+                         epsilon=1e-07,
+                         **opts):
+
+        self._optimizer = RMSprop(learning_rate=learning_rate,rho=rho,momentum=momentum,epsilon=epsilon)

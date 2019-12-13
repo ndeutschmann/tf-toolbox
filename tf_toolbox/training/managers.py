@@ -1,3 +1,3 @@
-from .optimizer_manager import SGDManager, AdamManager
+from .optimizer_manager import SGDManager, AdamManager,SGDMomentumManager, RMSpropManager
 from .model_manager import DenseRectClassifierManager
 from .experiment_manager import ExperimentManager
