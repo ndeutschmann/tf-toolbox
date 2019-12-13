@@ -94,10 +94,13 @@ class ExperimentManager:
         print("Starting run "+self.run_name)
         # The main reason for this class is this line below:
         # build a Hparam-keyed dictionnary for proper logging
-        hparams_values = dict([(self.hp_dict[k],run_opts[k]) for k in self.hp_dict])
+        hparam_values = dict([(self.hp_dict[k],run_opts[k]) for k in self.hp_dict])
         run_logdir = os.path.join(self.logdir,self.run_name)
 
-        result = self.model_manager.train_model(logdir=run_logdir, hparam=hparams_values, epoch_start=self.epoch,**run_opts)
+        with tf.summary.create_file_writer(run_logdir).as_default():
+            hp.hparams(hparam_values)
+            result = self.model_manager.train_model(logdir=run_logdir, epoch_start=self.epoch, hparam=hparam_values, logger_functions=[tf.summary.scalar], **run_opts)
+
         if "epochs" in run_opts:
             self.epoch+=run_opts['epochs']
         return result

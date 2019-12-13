@@ -238,8 +238,8 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         self.load_weights_from_checkpoint(checkpoint_path)
 
     def train_model(self, train_mode = "variance_forward", batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
-                    logging=True, log_tb=True, pretty_progressbar=True, save_best = True,
-                    *, f, logdir, hparam, **train_opts):
+                    logging=True, pretty_progressbar=True, save_best = True,
+                    *, f, logdir, hparam, logger_functions, **train_opts):
         """Training method that dispatches the model into the different training modes.
 
         Training modes are implemented as methods named with the convention _train_{train_mode}
@@ -277,22 +277,14 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         if save_best:
             self.save_hparams_and_weights(hparam=hparam,logdir=logdir)
 
-        # if we use tensorboard, wrap the run in a file writer
-        if log_tb:
-            with tf.summary.create_file_writer(logdir).as_default():
-                hp.hparams(hparam)
-                return trainer(f, batch_size=batch_size, minibatch_size=minibatch_size, epochs=epochs, epoch_start=epoch_start,
-                               logging=logging, log_tb=log_tb, pretty_progressbar=pretty_progressbar,
-                               optimizer_object=self.optimizer_object, save_best=save_best, logdir=logdir, **train_opts)
-        # Otherwise just start training
-        else:
-            return trainer(f, batch_size=batch_size, minibatch_size=minibatch_size, epochs=epochs, epoch_start=epoch_start,
-                           logging=logging, log_tb=log_tb, pretty_progressbar=pretty_progressbar,
-                           optimizer_object=self.optimizer_object, save_best=save_best, logdir=logdir, **train_opts)
+        return trainer(f, batch_size=batch_size, minibatch_size=minibatch_size, epochs=epochs, epoch_start=epoch_start,
+                           logging=logging, pretty_progressbar=pretty_progressbar,
+                           optimizer_object=self.optimizer_object, save_best=save_best, logdir=logdir,
+                        logger_functions=logger_functions, **train_opts)
 
     def _train_variance_forward(self, f, batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
-                                logging=True, log_tb=True, pretty_progressbar=True, save_best=True,
-                                *, optimizer_object, logdir, **train_opts):
+                                logging=True, pretty_progressbar=True, save_best=True,
+                                *, optimizer_object, logdir, logger_functions, **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
         See notes equation TODO
@@ -316,7 +308,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
         """
 
         # Minibatch logic
-        assert minibatch_size<batch_size, "The minibatch size must be smaller than the batch size"
+        assert minibatch_size<=batch_size, "The minibatch size must be smaller than the batch size"
         n_minibatches = int(batch_size/minibatch_size)
 
         # Instantiate a pretty progress bar if needed
@@ -398,10 +390,11 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
             if logging:
                 history.on_epoch_end(epoch=i,logs={"loss":loss_cumul.numpy(), "std":std_cumul.numpy()})
 
-            # Log the data in tensorboard
-            if log_tb:
-                tf.summary.scalar('loss', data=loss_cumul, step=i)
-                tf.summary.scalar('std',  data=std_cumul,  step=i)
+            # Log the data
+            # Logger function must take arguments as name,value,step
+            for lf in logger_functions:
+                lf('loss', loss_cumul, i)
+                lf('std',  std_cumul,  i)
 
             if save_best and std_cumul < best_std:
                 best_std = std_cumul
