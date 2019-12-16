@@ -1,6 +1,7 @@
 from .model_manager import ModelManager
 from .optimizer_manager import OptimizerManager
 from time import time
+from abc import abstractmethod
 import tensorboard.plugins.hparams.api as hp
 import tensorflow as tf
 import os
@@ -35,9 +36,6 @@ class ExperimentManager:
         self.run_id = 0
         self.epoch = 0
 
-    def setup_tb(self):
-        with tf.summary.create_file_writer(self.logdir).as_default():
-            hp.hparams_config(hparams=self.hp_dict.values(),metrics=self.model_manager.metrics.values())
 
     def hp_dict_template(self):
         """Output a string that describes a dictionnary { hyperparameter1: X1, ... } with empty X1,
@@ -77,6 +75,10 @@ class ExperimentManager:
         self.run_name = _full_run_name
         self.epoch = 0
 
+    @abstractmethod
+    def start_model_manager_training(self,**opts):
+        pass
+
     def do_run(self,**run_opts):
         """Start a training run
         Arguments depend on the specific model/training mode. Look at the signature of self.model_manager.train_model
@@ -97,9 +99,7 @@ class ExperimentManager:
         hparam_values = dict([(self.hp_dict[k],run_opts[k]) for k in self.hp_dict])
         run_logdir = os.path.join(self.logdir,self.run_name)
 
-        with tf.summary.create_file_writer(run_logdir).as_default():
-            hp.hparams(hparam_values)
-            result = self.model_manager.train_model(logdir=run_logdir, epoch_start=self.epoch, hparam=hparam_values, logger_functions=[tf.summary.scalar], **run_opts)
+        result = self.start_model_manager_training(run_logdir=run_logdir,hparam_values=hparam_values,**run_opts)
 
         if "epochs" in run_opts:
             self.epoch+=run_opts['epochs']
@@ -110,3 +110,15 @@ class ExperimentManager:
         self.run_id += 1
         self.epoch = 0
         del self.model_manager.model
+
+
+class TBExperimentManager(ExperimentManager):
+
+    def setup_tb(self):
+        with tf.summary.create_file_writer(self.logdir).as_default():
+            hp.hparams_config(hparams=self.hp_dict.values(),metrics=self.model_manager.metrics.values())
+
+    def start_model_manager_training(self,*,run_logdir,hparam_values,**run_opts):
+        with tf.summary.create_file_writer(run_logdir).as_default():
+            hp.hparams(hparam_values)
+            result = self.model_manager.train_model(logdir=run_logdir, epoch_start=self.epoch, hparam=hparam_values, logger_functions=[tf.summary.scalar], **run_opts)
