@@ -26,9 +26,7 @@ class GenericFlowManager(StandardModelManager):
         Args:
             f (): function to train on
             logging (): return loss and accuracy histories?
-            log_tb (): log metrics and hparams into tensorboard (tb)?
             logdir (): where to log tb data
-            hparam (): tb.plugins.hparam.Hparam-keyed dict for hparam logging in tb. TODO add YAML logging w/o tb
             train_mode ():
             batch_size ():
             epochs ():
@@ -36,7 +34,9 @@ class GenericFlowManager(StandardModelManager):
             pretty_progressbar ():
             minibatch_size ():
             save_best():
+            logger_functions():
             **train_opts ():
+
 
         Returns:
             keras.callbacks.History
