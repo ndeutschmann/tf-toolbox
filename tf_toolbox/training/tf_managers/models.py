@@ -111,24 +111,25 @@ class StandardModelManager(AM.ModelManager):
             self._model = None
         else:
             raise AttributeError("No model was instantiated")
-    def save_weights(self,*,logdir):
+
+    def save_weights(self, *, logdir, prefix=""):
         """Save the current weights"""
-        filename = os.path.join(logdir,"model_checkpoint","weights.h5")
+        filename = os.path.join(logdir, "model_info", prefix, "weights.h5")
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         self.model.save_weights(filename)
 
-    def save_hparams(self, *, hparam, logdir):
+    def save_hparams(self, *, hparam, logdir, prefix=""):
         """Save the hyperparameters that were used to instantiate and train this model"""
         param_name_dict = dict([(h.name,val) for h,val in hparam.items()])
-        filename = os.path.join(logdir,"model_checkpoint","hparams.yaml")
+        filename = os.path.join(logdir, "model_info", prefix, "hparams.yaml")
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, "w+") as hparams_yaml:
             yaml.safe_dump(param_name_dict,stream=hparams_yaml)
 
-    def save_hparams_and_weights(self,*, hparam, logdir):
+    def save_hparams_and_weights(self,*, hparam, logdir, prefix=""):
         """Save the hyperparameters and the current weights"""
-        self.save_weights(logdir=logdir)
-        self.save_hparams(hparam=hparam,logdir=logdir)
+        self.save_weights(logdir=logdir, prefix=prefix)
+        self.save_hparams(hparam=hparam,logdir=logdir, prefix=prefix)
 
     def load_weights(self,weight_file_path):
         """Load saved weights into an existing model"""

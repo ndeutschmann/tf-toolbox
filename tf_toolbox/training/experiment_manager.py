@@ -3,7 +3,6 @@ from .optimizer_manager import OptimizerManager
 from time import time
 from abc import abstractmethod
 import tensorboard.plugins.hparams.api as hp
-import tensorflow as tf
 import os
 
 class ExperimentManager:
@@ -111,15 +110,3 @@ class ExperimentManager:
         self.run_id += 1
         self.epoch = 0
         del self.model_manager.model
-
-
-class TBExperimentManager(ExperimentManager):
-
-    def setup_tb(self):
-        with tf.summary.create_file_writer(self.logdir).as_default():
-            hp.hparams_config(hparams=self.hp_dict.values(),metrics=self.model_manager.metrics.values())
-
-    def start_model_manager_training(self,*,run_logdir,hparam_values,**run_opts):
-        with tf.summary.create_file_writer(run_logdir).as_default():
-            hp.hparams(hparam_values)
-            result = self.model_manager.train_model(logdir=run_logdir, epoch_start=self.epoch, hparam=hparam_values, logger_functions=[tf.summary.scalar], **run_opts)

@@ -13,7 +13,7 @@ class GenericFlowManager(StandardModelManager):
 
     def train_model(self, train_mode = "variance_forward", batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
                     logging=True, pretty_progressbar=True, save_best = True,
-                    *, f, logdir, hparam, logger_functions, **train_opts):
+                    *, f, logdir, logger_functions, **train_opts):
         """Training method that dispatches the model into the different training modes.
 
         Training modes are implemented as methods named with the convention _train_{train_mode}
@@ -47,9 +47,14 @@ class GenericFlowManager(StandardModelManager):
         except AttributeError as error:
             raise AttributeError("The train mode %s does not exist."%train_mode)
 
+        assert hasattr(self,"optimizer_object") and getattr(self,"optimizer_object") is not None, "This model manager " \
+                                                                                                  "needs an " \
+                                                                                                  "optimizer_object " \
+                                                                                                  "to run "
+
         # if we save a checkpoint for the best model in training history, initialize the checkpoint and log the hparams
         if save_best:
-            self.save_hparams_and_weights(hparam=hparam,logdir=logdir)
+            self.save_weights(logdir=logdir,prefix="best")
 
         return trainer(f, batch_size=batch_size, minibatch_size=minibatch_size, epochs=epochs, epoch_start=epoch_start,
                            logging=logging, pretty_progressbar=pretty_progressbar,
@@ -172,7 +177,7 @@ class GenericFlowManager(StandardModelManager):
 
             if save_best and std_cumul < best_std:
                 best_std = std_cumul
-                self.save_weights(logdir=logdir)
+                self.save_weights(logdir=logdir,prefix="best")
 
         if isinstance(minibatch_progress,tqdm_recycled):
             minibatch_progress.really_close()
@@ -279,6 +284,8 @@ class RollingPWlinearNormalizingFlowManager(GenericFlowManager):
         self._metrics = {
             "std": hp.Metric("std", display_name="Integrand standard deviation")
         }
+
+        self.optimizer_object = None
 
     format_input = AddJacobian()
 
