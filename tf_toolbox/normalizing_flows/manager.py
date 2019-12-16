@@ -4,11 +4,188 @@ import tensorboard.plugins.hparams.api as hp
 from tqdm.autonotebook import tqdm
 from tf_toolbox.training.misc import tqdm_recycled
 from .layers import AddJacobian, PieceWiseLinear, RollLayer
-import tf_toolbox.training.abstract_managers as AM
-import yaml
-import os
 
-class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
+from ..training.tf_managers.models import StandardModelManager
+
+
+class GenericFlowManager(StandardModelManager):
+    """Generic flow model manager implementing architecture-independent methods (training, etc)"""
+
+    def train_model(self, train_mode = "variance_forward", batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
+                    logging=True, pretty_progressbar=True, save_best = True,
+                    *, f, logdir, logger_functions, **train_opts):
+        """Training method that dispatches the model into the different training modes.
+
+        Training modes are implemented as methods named with the convention _train_{train_mode}
+
+        Currently implemented modes are
+            * variance_forward
+                specific options are (TODO)
+            * TODO
+
+        Args:
+            f (): function to train on
+            logging (): return loss and accuracy histories?
+            log_tb (): log metrics and hparams into tensorboard (tb)?
+            logdir (): where to log tb data
+            hparam (): tb.plugins.hparam.Hparam-keyed dict for hparam logging in tb. TODO add YAML logging w/o tb
+            train_mode ():
+            batch_size ():
+            epochs ():
+            epoch_start():
+            pretty_progressbar ():
+            minibatch_size ():
+            save_best():
+            **train_opts ():
+
+        Returns:
+            keras.callbacks.History
+
+        """
+        try:
+            trainer = getattr(self,"_train_"+train_mode)
+        except AttributeError as error:
+            raise AttributeError("The train mode %s does not exist."%train_mode)
+
+        assert hasattr(self,"optimizer_object") and getattr(self,"optimizer_object") is not None, "This model manager " \
+                                                                                                  "needs an " \
+                                                                                                  "optimizer_object " \
+                                                                                                  "to run "
+
+        # if we save a checkpoint for the best model in training history, initialize the checkpoint and log the hparams
+        if save_best:
+            self.save_weights(logdir=logdir,prefix="best")
+
+        return trainer(f, batch_size=batch_size, minibatch_size=minibatch_size, epochs=epochs, epoch_start=epoch_start,
+                           logging=logging, pretty_progressbar=pretty_progressbar,
+                           optimizer_object=self.optimizer_object, save_best=save_best, logdir=logdir,
+                        logger_functions=logger_functions, **train_opts)
+
+    def _train_variance_forward(self, f, batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
+                                logging=True, pretty_progressbar=True, save_best=True,
+                                *, optimizer_object, logdir, logger_functions, **train_opts):
+        """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
+        (fixed latent space sample mapped to a phase space sample)
+        See notes equation TODO
+
+        Args:
+            f ():
+            batch_size ():
+            minibatch_size():
+            epochs ():
+            epoch_start ():
+            logging ():
+            log_tb ():
+            pretty_progressbar ():
+            optimizer_object ():
+            save_best ():
+            logdir ():
+            **train_opts ():
+
+        Returns:
+
+        """
+
+        # Minibatch logic
+        assert minibatch_size<=batch_size, "The minibatch size must be smaller than the batch size"
+        n_minibatches = int(batch_size/minibatch_size)
+
+        # Instantiate a pretty progress bar if needed
+        if pretty_progressbar:
+            epoch_progress = tqdm(range(epoch_start,epoch_start+epochs), leave=False, desc="Loss: {0:.3e} | Epoch".format(0.))
+            # Instantiate a pretty progress bar for the minibatch loop if it is not trivial
+            if n_minibatches>1:
+                minibatch_progress = tqdm_recycled(range(n_minibatches), leave=False, desc="Step")
+            else:
+                minibatch_progress = range(n_minibatches)
+
+        else:
+            epoch_progress = range(epoch_start, epoch_start+epochs)
+            minibatch_progress = range(n_minibatches)
+
+        # Keep track of metric history if needed
+        if logging:
+            history = keras.callbacks.History()
+            history.on_train_begin()
+
+        # Run the model once
+        XJ = self.model(  # Pass through the model
+            self.format_input(  # Append a unit Jacobian to each point
+                tf.random.uniform((minibatch_size, self.n_flow), 0, 1)  # Generate a batch of points in latent space
+            )
+        )
+        # Initialize tracking for checkpoints
+        if save_best:
+            fX = f(XJ[:,:-1])
+            J = XJ[:,-1]
+            best_std = tf.math.reduce_std(fX*J)
+
+        self.model.build((minibatch_size, self.n_flow+1))
+        variables = self.model.trainable_variables
+
+        # Loop over epochs
+        for i in epoch_progress:
+            grads_cumul = [tf.zeros_like(variable) for variable in variables]
+            loss_cumul = 0
+            std_cumul = 0
+            for j in minibatch_progress:
+                with tf.GradientTape() as tape:
+                    # Output a sample of (phase-space point, forward Jacobian)
+                    XJ = self.model(                                            # Pass through the model
+                        self.format_input(                                      # Append a unit Jacobian to each point
+                            tf.random.uniform((minibatch_size, self.n_flow), 0, 1)  # Generate a batch of points in latent space
+                        )
+                    )
+                    # Separate the points and their Jacobians:
+                    # This sample is fixed, we optimize the Jacobian
+                    X = tf.stop_gradient(XJ[:,:-1])
+                    # The Jacobian is the last entry of each point
+                    J = XJ[:,-1]
+                    # Apply function values
+                    fX = f(X)
+
+                    # The Monte Carlo integrand is fX*J: we minimize its variance
+                    loss = tf.math.reduce_variance(fX*J)
+                    std = tf.math.sqrt(tf.stop_gradient(loss))
+                    loss = tf.math.log(loss)
+                    # Regularization losses are collected as we move forward in the model
+                    loss += sum(self.model.losses)
+
+                # Compute and apply gradients
+                grads = tape.gradient(loss, self.model.trainable_variables)
+                grads_cumul = [grads[i]+grads_cumul[i] for i in range(len(grads))]
+                loss_cumul += loss
+                std_cumul += std
+            grads_cumul = [g / minibatch_size for g in grads_cumul]
+            loss_cumul /= n_minibatches
+            std_cumul /= n_minibatches
+            optimizer_object.apply_gradients(zip(grads_cumul, self.model.trainable_variables))
+
+            # Update the progress bar
+            if pretty_progressbar:
+                epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss_cumul))
+
+            # Log the relevant data for internal use
+            if logging:
+                history.on_epoch_end(epoch=i,logs={"loss":loss_cumul.numpy(), "std":std_cumul.numpy()})
+
+            # Log the data
+            # Logger function must take arguments as name,value,step
+            for lf in logger_functions:
+                lf('loss', loss_cumul, i)
+                lf('std',  std_cumul,  i)
+
+            if save_best and std_cumul < best_std:
+                best_std = std_cumul
+                self.save_weights(logdir=logdir,prefix="best")
+
+        if isinstance(minibatch_progress,tqdm_recycled):
+            minibatch_progress.really_close()
+        if logging:
+            return history
+
+
+class RollingPWlinearNormalizingFlowManager(GenericFlowManager):
     """A manager for normalizing flows with piecewise linear coupling cells interleaved with rolling layers that
     apply cyclic permutations on the variables. All cells have the same number of pass through variables and the
     same step size in the cyclic permutation.
@@ -108,35 +285,7 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
             "std": hp.Metric("std", display_name="Integrand standard deviation")
         }
 
-    @property
-    def hparam(self):
-        return self._hparam
-
-    @property
-    def metrics(self):
-        return self._metrics
-
-    @property
-    def model(self):
-        if self._model is not None:
-            return self._model
-        else:
-            raise AttributeError("No model was instantiated")
-
-    @model.deleter
-    def model(self):
-        if self._model is not None:
-            del self._model
-            self._model = None
-        else:
-            raise AttributeError("No model was instantiated")
-
-    @property
-    def inverse_model(self):
-        if self._inverse_model is not None:
-            return self._inverse_model
-        else:
-            raise AttributeError("No inverse model was instantiated")
+        self.optimizer_object = None
 
     format_input = AddJacobian()
 
@@ -192,224 +341,3 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
                 tf.random.uniform((1,self.n_flow),0.,1.)
             )
         )
-
-    def save_weights(self,*,logdir):
-        """Save the current weights"""
-        filename = os.path.join(logdir,"model_checkpoint","weights.h5")
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        self.model.save_weights(filename)
-
-    def save_hparams(self, *, hparam, logdir):
-        """Save the hyperparameters that were used to instantiate and train this model"""
-        param_name_dict = dict([(h.name,val) for h,val in hparam.items()])
-        filename = os.path.join(logdir,"model_checkpoint","hparams.yaml")
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(filename, "w+") as hparams_yaml:
-            yaml.safe_dump(param_name_dict,stream=hparams_yaml)
-
-    def save_hparams_and_weights(self,*, hparam, logdir):
-        """Save the hyperparameters and the current weights"""
-        self.save_weights(logdir=logdir)
-        self.save_hparams(hparam=hparam,logdir=logdir)
-
-    def load_weights(self,weight_file_path):
-        """Load saved weights into an existing model"""
-        self.model.load_weights(weight_file_path)
-
-    def load_weights_from_checkpoint(self, checkpoint_path):
-        """Load saved weights from a checkpoint directory into an existing model"""
-        filename = os.path.join(checkpoint_path,"weights.h5")
-        self.load_weights(filename)
-
-    def create_model_from_hparams(self, hparams_yaml_path, *, optimizer_object):
-        """Create a model from a YAML hyperparameter file and an optimizer"""
-        with open(hparams_yaml_path, "r") as hparams_yaml:
-            hparams = yaml.load(hparams_yaml, Loader=yaml.FullLoader)
-        self.create_model(optimizer_object=optimizer_object, **hparams)
-
-    def create_model_from_checkpoint(self ,checkpoint_path, *, optimizer_object):
-        """Create a model from the hyperparameters of a checkpoint and an optimizer"""
-        hparams_yaml_path = os.path.join(checkpoint_path, "hparams.yaml")
-        self.create_model_from_hparams(hparams_yaml_path, optimizer_object=optimizer_object)
-
-    def load_model_from_checkpoint(self, checkpoint_path, *, optimizer_object):
-        """Create and load a pre-trained model from a checkpoint"""
-        self.create_model_from_checkpoint(checkpoint_path,optimizer_object=optimizer_object)
-        self.load_weights_from_checkpoint(checkpoint_path)
-
-    def train_model(self, train_mode = "variance_forward", batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
-                    logging=True, log_tb=True, pretty_progressbar=True, save_best = True,
-                    *, f, logdir, hparam, **train_opts):
-        """Training method that dispatches the model into the different training modes.
-
-        Training modes are implemented as methods named with the convention _train_{train_mode}
-
-        Currently implemented modes are
-            * variance_forward
-                specific options are (TODO)
-            * TODO
-
-        Args:
-            f (): function to train on
-            logging (): return loss and accuracy histories?
-            log_tb (): log metrics and hparams into tensorboard (tb)?
-            logdir (): where to log tb data
-            hparam (): tb.plugins.hparam.Hparam-keyed dict for hparam logging in tb. TODO add YAML logging w/o tb
-            train_mode ():
-            batch_size ():
-            epochs ():
-            epoch_start():
-            pretty_progressbar ():
-            minibatch_size ():
-            save_best():
-            **train_opts ():
-
-        Returns:
-            keras.callbacks.History
-
-        """
-        try:
-            trainer = getattr(self,"_train_"+train_mode)
-        except AttributeError as error:
-            raise AttributeError("The train mode %s does not exist."%train_mode)
-
-        # if we save a checkpoint for the best model in training history, initialize the checkpoint and log the hparams
-        if save_best:
-            self.save_hparams_and_weights(hparam=hparam,logdir=logdir)
-
-        # if we use tensorboard, wrap the run in a file writer
-        if log_tb:
-            with tf.summary.create_file_writer(logdir).as_default():
-                hp.hparams(hparam)
-                return trainer(f, batch_size=batch_size, minibatch_size=minibatch_size, epochs=epochs, epoch_start=epoch_start,
-                               logging=logging, log_tb=log_tb, pretty_progressbar=pretty_progressbar,
-                               optimizer_object=self.optimizer_object, save_best=save_best, logdir=logdir, **train_opts)
-        # Otherwise just start training
-        else:
-            return trainer(f, batch_size=batch_size, minibatch_size=minibatch_size, epochs=epochs, epoch_start=epoch_start,
-                           logging=logging, log_tb=log_tb, pretty_progressbar=pretty_progressbar,
-                           optimizer_object=self.optimizer_object, save_best=save_best, logdir=logdir, **train_opts)
-
-    def _train_variance_forward(self, f, batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
-                                logging=True, log_tb=True, pretty_progressbar=True, save_best=True,
-                                *, optimizer_object, logdir, **train_opts):
-        """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
-        (fixed latent space sample mapped to a phase space sample)
-        See notes equation TODO
-
-        Args:
-            f ():
-            batch_size ():
-            minibatch_size():
-            epochs ():
-            epoch_start ():
-            logging ():
-            log_tb ():
-            pretty_progressbar ():
-            optimizer_object ():
-            save_best ():
-            logdir ():
-            **train_opts ():
-
-        Returns:
-
-        """
-
-        # Minibatch logic
-        assert minibatch_size<batch_size, "The minibatch size must be smaller than the batch size"
-        n_minibatches = int(batch_size/minibatch_size)
-
-        # Instantiate a pretty progress bar if needed
-        if pretty_progressbar:
-            epoch_progress = tqdm(range(epoch_start,epoch_start+epochs), leave=False, desc="Loss: {0:.3e} | Epoch".format(0.))
-            # Instantiate a pretty progress bar for the minibatch loop if it is not trivial
-            if n_minibatches>1:
-                minibatch_progress = tqdm_recycled(range(n_minibatches), leave=False, desc="Step")
-            else:
-                minibatch_progress = range(n_minibatches)
-
-        else:
-            epoch_progress = range(epoch_start, epoch_start+epochs)
-            minibatch_progress = range(n_minibatches)
-
-        # Keep track of metric history if needed
-        if logging:
-            history = keras.callbacks.History()
-            history.on_train_begin()
-
-        # Run the model once
-        XJ = self.model(  # Pass through the model
-            self.format_input(  # Append a unit Jacobian to each point
-                tf.random.uniform((minibatch_size, self.n_flow), 0, 1)  # Generate a batch of points in latent space
-            )
-        )
-        # Initialize tracking for checkpoints
-        if save_best:
-            fX = f(XJ[:,:-1])
-            J = XJ[:,-1]
-            best_std = tf.math.reduce_std(fX*J)
-
-        self.model.build((minibatch_size, self.n_flow+1))
-        variables = self.model.trainable_variables
-
-        # Loop over epochs
-        for i in epoch_progress:
-            grads_cumul = [tf.zeros_like(variable) for variable in variables]
-            loss_cumul = 0
-            std_cumul = 0
-            for j in minibatch_progress:
-                with tf.GradientTape() as tape:
-                    # Output a sample of (phase-space point, forward Jacobian)
-                    XJ = self.model(                                            # Pass through the model
-                        self.format_input(                                      # Append a unit Jacobian to each point
-                            tf.random.uniform((minibatch_size, self.n_flow), 0, 1)  # Generate a batch of points in latent space
-                        )
-                    )
-                    # Separate the points and their Jacobians:
-                    # This sample is fixed, we optimize the Jacobian
-                    X = tf.stop_gradient(XJ[:,:-1])
-                    # The Jacobian is the last entry of each point
-                    J = XJ[:,-1]
-                    # Apply function values
-                    fX = f(X)
-
-                    # The Monte Carlo integrand is fX*J: we minimize its variance
-                    loss = tf.math.reduce_variance(fX*J)
-                    std = tf.math.sqrt(tf.stop_gradient(loss))
-                    loss = tf.math.log(loss)
-                    # Regularization losses are collected as we move forward in the model
-                    loss += sum(self.model.losses)
-
-                # Compute and apply gradients
-                grads = tape.gradient(loss, self.model.trainable_variables)
-                grads_cumul = [grads[i]+grads_cumul[i] for i in range(len(grads))]
-                loss_cumul += loss
-                std_cumul += std
-            grads_cumul = [g / minibatch_size for g in grads_cumul]
-            loss_cumul /= n_minibatches
-            std_cumul /= n_minibatches
-            optimizer_object.apply_gradients(zip(grads_cumul, self.model.trainable_variables))
-
-            # Update the progress bar
-            if pretty_progressbar:
-                epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss_cumul))
-
-            # Log the relevant data for internal use
-            if logging:
-                history.on_epoch_end(epoch=i,logs={"loss":loss_cumul.numpy(), "std":std_cumul.numpy()})
-
-            # Log the data in tensorboard
-            if log_tb:
-                tf.summary.scalar('loss', data=loss_cumul, step=i)
-                tf.summary.scalar('std',  data=std_cumul,  step=i)
-
-            if save_best and std_cumul < best_std:
-                best_std = std_cumul
-                self.save_weights(logdir=logdir)
-
-        if isinstance(minibatch_progress,tqdm_recycled):
-            minibatch_progress.really_close()
-        if logging:
-            return history
-
-

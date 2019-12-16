@@ -1,6 +1,10 @@
-from tensorboard.plugins.hparams import api as hp
-from tensorflow_core.python.keras.api._v2 import keras as keras
+import os
 
+import yaml
+from tensorboard.plugins.hparams import api as hp
+from tensorflow import keras
+
+from tf_toolbox.training import abstract_managers as AM
 from tf_toolbox.training.model_manager import ModelManager
 
 
@@ -80,3 +84,84 @@ class DenseRectClassifierManager(ModelManager):
                 callbacks.append(keras_callback)
 
         return self.model.fit(X, y, epochs=epochs, batch_size=batch_size, callbacks=callbacks, **fit_options)
+
+
+class StandardModelManager(AM.ModelManager):
+    """Standard API realization for a model manager"""
+
+    @property
+    def hparam(self):
+        return self._hparam
+
+    @property
+    def metrics(self):
+        return self._metrics
+
+    @property
+    def model(self):
+        if self._model is not None:
+            return self._model
+        else:
+            raise AttributeError("No model was instantiated")
+
+    @model.deleter
+    def model(self):
+        if self._model is not None:
+            del self._model
+            self._model = None
+        else:
+            raise AttributeError("No model was instantiated")
+
+    def save_weights(self, *, logdir, prefix=""):
+        """Save the current weights"""
+        filename = os.path.join(logdir, "model_info", prefix, "weights.h5")
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        self.model.save_weights(filename)
+
+    def save_hparams(self, *, hparam, logdir, prefix=""):
+        """Save the hyperparameters that were used to instantiate and train this model"""
+        param_name_dict = dict([(h.name,val) for h,val in hparam.items()])
+        filename = os.path.join(logdir, "model_info", prefix, "hparams.yaml")
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, "w+") as hparams_yaml:
+            yaml.safe_dump(param_name_dict,stream=hparams_yaml)
+
+    def save_hparams_and_weights(self,*, hparam, logdir, prefix=""):
+        """Save the hyperparameters and the current weights"""
+        self.save_weights(logdir=logdir, prefix=prefix)
+        self.save_hparams(hparam=hparam,logdir=logdir, prefix=prefix)
+
+    def load_weights(self,weight_file_path):
+        """Load saved weights into an existing model"""
+        self.model.load_weights(weight_file_path)
+
+    def load_weights_from_checkpoint(self, checkpoint_path):
+        """Load saved weights from a checkpoint directory into an existing model"""
+        filename = os.path.join(checkpoint_path,"weights.h5")
+        self.load_weights(filename)
+
+    def create_model_from_hparams(self, hparams_yaml_path, *, optimizer_object):
+        """Create a model from a YAML hyperparameter file and an optimizer"""
+        with open(hparams_yaml_path, "r") as hparams_yaml:
+            hparams = yaml.load(hparams_yaml, Loader=yaml.FullLoader)
+        self.create_model(optimizer_object=optimizer_object, **hparams)
+
+    def create_model_from_checkpoint(self ,checkpoint_path, *, optimizer_object):
+        """Create a model from the hyperparameters of a checkpoint and an optimizer"""
+        hparams_yaml_path = os.path.join(checkpoint_path, "hparams.yaml")
+        self.create_model_from_hparams(hparams_yaml_path, optimizer_object=optimizer_object)
+
+    def load_model_from_checkpoint(self, checkpoint_path, *, optimizer_object):
+        """Create and load a pre-trained model from a checkpoint"""
+        self.create_model_from_checkpoint(checkpoint_path,optimizer_object=optimizer_object)
+        self.load_weights_from_checkpoint(checkpoint_path)
+
+
+class InversibleModelManager(StandardModelManager):
+    """Standard API realization for an inversible model manager"""
+    @property
+    def inverse_model(self):
+        if self._inverse_model is not None:
+            return self._inverse_model
+        else:
+            raise AttributeError("No inverse model was instantiated")

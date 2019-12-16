@@ -8,5 +8,5 @@ class tqdm_recycled(tqdm):
     def really_close(self):
         try:
             self.sp(close=True)
-        except AttributeError as e:
+        except (AttributeError, TypeError) as e:
             pass
