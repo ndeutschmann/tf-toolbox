@@ -1,5 +1,5 @@
 import tensorflow as tf
-import tensorflow.keras as keras
+from tensorflow import keras
 
 
 class AffineCoupling(keras.layers.Layer):
@@ -30,16 +30,6 @@ class AffineCoupling(keras.layers.Layer):
         return tf.concat((xA, yB, tf.expand_dims(jacobian, 1)), axis=1)
 
 
-class AddJacobian(keras.layers.Layer):
-    def __init__(self, jacobian_value=tf.constant(1.)):
-        super(AddJacobian, self).__init__()
-        self.jacobian_value = jacobian_value
-
-    def call(self, input):
-        return tf.concat((input, tf.broadcast_to(self.jacobian_value, (input.shape[0], 1))), axis=1)
-
-
-# WIP
 class PieceWiseLinear(keras.layers.Layer):
     def __init__(self, flow_size, pass_through_size, n_bins=10, nn_layers=[], reg=0., dropout=0.,
                  final_activation="exponential"):
@@ -112,22 +102,3 @@ class InversePieceWiseLinear(keras.layers.Layer):
         xB = (yB - offsets) / slopes + (tf.squeeze(tf.cast(ybins, tf.float32), axis=-1)) / self.n_bins
         jacobian *= tf.expand_dims(tf.reduce_prod(1 / slopes, axis=-1), axis=-1)
         return tf.concat((yA, xB, jacobian), axis=-1)
-
-
-class RollLayer(keras.layers.Layer):
-    def __init__(self, shift):
-        super(RollLayer, self).__init__()
-        self.shift = shift
-        self.inverse = InverseRollLayer(self)
-
-    def call(self, x):
-        return tf.concat((tf.roll(x[:, :-1], self.shift, axis=-1), x[:, -1:]), axis=-1)
-
-
-class InverseRollLayer(keras.layers.Layer):
-    def __init__(self, roll_layer):
-        super(InverseRollLayer, self).__init__()
-        self.shift = roll_layer.shift
-
-    def call(self, x):
-        return tf.concat((tf.roll(x[:, :-1], -self.shift, axis=-1), x[:, -1:]), axis=-1)

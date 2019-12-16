@@ -3,7 +3,8 @@ import tensorflow.keras as keras
 import tensorboard.plugins.hparams.api as hp
 from tqdm.autonotebook import tqdm
 from tf_toolbox.training.misc import tqdm_recycled
-from .layers import AddJacobian, PieceWiseLinear, RollLayer
+from .layers.coupling_cells import PieceWiseLinear
+from .layers.misc import AddJacobian, RollLayer
 
 from ..training.tf_managers.models import StandardModelManager
 

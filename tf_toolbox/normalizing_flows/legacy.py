@@ -2,7 +2,9 @@ import tensorflow as tf
 import tensorflow.keras as keras
 import tensorflow_probability as tfp
 from tqdm.autonotebook import tqdm
-from .layers import AddJacobian,PieceWiseLinear
+from .layers.coupling_cells import PieceWiseLinear
+from .layers.misc import AddJacobian
+
 
 class NormalizingFlow:
 
