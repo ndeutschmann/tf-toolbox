@@ -77,6 +77,7 @@ class ExperimentManager:
 
     @abstractmethod
     def start_model_manager_training(self,**opts):
+        """Experiment-type specific command"""
         pass
 
     def do_run(self,**run_opts):

@@ -4,238 +4,12 @@ import tensorboard.plugins.hparams.api as hp
 from tqdm.autonotebook import tqdm
 from tf_toolbox.training.misc import tqdm_recycled
 from .layers import AddJacobian, PieceWiseLinear, RollLayer
-import tf_toolbox.training.abstract_managers as AM
-import yaml
-import os
 
-class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
-    """A manager for normalizing flows with piecewise linear coupling cells interleaved with rolling layers that
-    apply cyclic permutations on the variables. All cells have the same number of pass through variables and the
-    same step size in the cyclic permutation.
-    Each coupling cell has a fully connected NN with a fixed number of layers (depth) of fixed size (width)
+from ..training.tf_managers.models import StandardModelManager
 
-    Hyperparameters:
-    - n_pass_through
-    - n_bins
-    - nn_width
-    - nn_depth
-    - nn_activation
-    - roll_step
-    - l2_reg
-    - dropout_rate
-    - TODO training mode
-    """
-    def __init__(self,
-                 *,
-                 n_flow: int,
-                 n_pass_through_domain = None,
-                 n_cells_domain=(1,10),
-                 n_bins_domain = (2,10),
-                 nn_width_domain = None,
-                 nn_depth_domain = (1,10),
-                 nn_activation_domain = ("relu",),
-                 roll_step_domain = None,
-                 l2_reg_domain = (0.,1.),
-                 dropout_rate_domain = (0.,1.),
-                 batch_size_domain = (100,1000000),
-                 **init_opts
-):
-        """
 
-        Args:
-            n_flow ():
-            n_pass_through_domain ():
-            n_cells_domain ():
-            n_bins_domain ():
-            nn_width_domain ():
-            nn_depth_domain ():
-            nn_activation_domain ():
-            roll_step_domain ():
-            l2_reg_domain ():
-            dropout_rate_domain ():
-            batch_size_domain ():
-            **init_opts ():
-        """
-        self.n_flow = n_flow
-        self._model = None
-        self._inverse_model = None
-
-        # Some domains do not have an explicit default value as we want them to be dependent on other domains
-        if n_pass_through_domain is None:
-            _n_pass_through_domain = [1,n_flow-1]
-        else: _n_pass_through_domain=n_pass_through_domain
-
-        if nn_width_domain is None:
-            _nn_width_domain = [n_bins_domain[0],5*n_bins_domain[1]]
-        else: _nn_width_domain=nn_width_domain
-
-        if roll_step_domain is None:
-            _roll_step_domain = [1,n_flow-1]
-        else: _roll_step_domain=roll_step_domain
-
-        # **Hyperparameters**
-        # Note that we include the number of batch points for training.
-        # This is because we only have an estimator for the loss (which is defined as an integral)
-        # And batch statistics has an impact on convergence
-        # Pedagogical note: a contrario if we divide this sample into N minibatches and accumulate the gradients
-        # before taking an optimizer step (typically for memory reasons)
-
-        self._hparam = {
-            "n_pass_through": hp.HParam("n_pass_through", domain=hp.IntInterval(*_n_pass_through_domain),display_name="# Pass"),
-
-            "n_cells": hp.HParam("n_cells",domain=hp.IntInterval(*n_cells_domain),display_name="# Cells"),
-
-            "n_bins": hp.HParam("n_bins", domain=hp.IntInterval(*n_bins_domain),display_name="# Bins"),
-
-            "nn_width": hp.HParam("nn_width", domain=hp.IntInterval(*_nn_width_domain),display_name="NN width"),
-
-            "nn_depth": hp.HParam("nn_depth", domain=hp.IntInterval(*nn_depth_domain),display_name="NN depth"),
-
-            "nn_activation": hp.HParam("nn_activation", domain=hp.Discrete(nn_activation_domain),display_name="NN activ. fct."),
-
-            "roll_step": hp.HParam("roll_step", domain=hp.IntInterval(*_roll_step_domain),display_name="Roll step"),
-
-            "l2_reg": hp.HParam("l2_reg", domain=hp.RealInterval(*l2_reg_domain),display_name="L2 reg."),
-
-            "dropout_rate": hp.HParam("dropout_rate", domain=hp.RealInterval(*dropout_rate_domain),display_name="Dropout rate"),
-
-            "batch_size": hp.HParam("batch_size", domain=hp.IntInterval(*batch_size_domain),
-                                      display_name="Batch size"),
-
-        }
-
-        self._metrics = {
-            "std": hp.Metric("std", display_name="Integrand standard deviation")
-        }
-
-    @property
-    def hparam(self):
-        return self._hparam
-
-    @property
-    def metrics(self):
-        return self._metrics
-
-    @property
-    def model(self):
-        if self._model is not None:
-            return self._model
-        else:
-            raise AttributeError("No model was instantiated")
-
-    @model.deleter
-    def model(self):
-        if self._model is not None:
-            del self._model
-            self._model = None
-        else:
-            raise AttributeError("No model was instantiated")
-
-    @property
-    def inverse_model(self):
-        if self._inverse_model is not None:
-            return self._inverse_model
-        else:
-            raise AttributeError("No inverse model was instantiated")
-
-    format_input = AddJacobian()
-
-    def create_model(self,*,
-                     n_pass_through,
-                     n_cells,
-                     n_bins,
-                     nn_width,
-                     nn_depth,
-                     nn_activation="relu",
-                     roll_step,
-                     l2_reg=0,
-                     dropout_rate=0,
-                     optimizer_object,
-                     **opts
-                     ):
-        """
-
-        Args:
-            n_pass_through ():
-            n_cells ():
-            n_bins ():
-            nn_width ():
-            nn_depth ():
-            nn_activation ():
-            roll_step ():
-            l2_reg ():
-            dropout_rate ():
-            optimizer_object():
-            **opts ():
-
-        Returns:
-
-        """
-
-        self._model = keras.Sequential()
-
-        for i_cell in range(n_cells):
-            nn_layers = [nn_width]*nn_depth
-            self._model.add(
-                PieceWiseLinear(self.n_flow, n_pass_through, n_bins=n_bins, nn_layers=nn_layers,
-                                reg=l2_reg, dropout=dropout_rate)
-            )
-            self._model.add(RollLayer(roll_step))
-
-        self._inverse_model = keras.Sequential([l.inverse for l in reversed(self._model.layers)])
-
-        self.optimizer_object = optimizer_object
-
-        # Do one pass forward:
-        self._model(
-            self.format_input(
-                tf.random.uniform((1,self.n_flow),0.,1.)
-            )
-        )
-
-    def save_weights(self,*,logdir):
-        """Save the current weights"""
-        filename = os.path.join(logdir,"model_checkpoint","weights.h5")
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        self.model.save_weights(filename)
-
-    def save_hparams(self, *, hparam, logdir):
-        """Save the hyperparameters that were used to instantiate and train this model"""
-        param_name_dict = dict([(h.name,val) for h,val in hparam.items()])
-        filename = os.path.join(logdir,"model_checkpoint","hparams.yaml")
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(filename, "w+") as hparams_yaml:
-            yaml.safe_dump(param_name_dict,stream=hparams_yaml)
-
-    def save_hparams_and_weights(self,*, hparam, logdir):
-        """Save the hyperparameters and the current weights"""
-        self.save_weights(logdir=logdir)
-        self.save_hparams(hparam=hparam,logdir=logdir)
-
-    def load_weights(self,weight_file_path):
-        """Load saved weights into an existing model"""
-        self.model.load_weights(weight_file_path)
-
-    def load_weights_from_checkpoint(self, checkpoint_path):
-        """Load saved weights from a checkpoint directory into an existing model"""
-        filename = os.path.join(checkpoint_path,"weights.h5")
-        self.load_weights(filename)
-
-    def create_model_from_hparams(self, hparams_yaml_path, *, optimizer_object):
-        """Create a model from a YAML hyperparameter file and an optimizer"""
-        with open(hparams_yaml_path, "r") as hparams_yaml:
-            hparams = yaml.load(hparams_yaml, Loader=yaml.FullLoader)
-        self.create_model(optimizer_object=optimizer_object, **hparams)
-
-    def create_model_from_checkpoint(self ,checkpoint_path, *, optimizer_object):
-        """Create a model from the hyperparameters of a checkpoint and an optimizer"""
-        hparams_yaml_path = os.path.join(checkpoint_path, "hparams.yaml")
-        self.create_model_from_hparams(hparams_yaml_path, optimizer_object=optimizer_object)
-
-    def load_model_from_checkpoint(self, checkpoint_path, *, optimizer_object):
-        """Create and load a pre-trained model from a checkpoint"""
-        self.create_model_from_checkpoint(checkpoint_path,optimizer_object=optimizer_object)
-        self.load_weights_from_checkpoint(checkpoint_path)
+class GenericFlowManager(StandardModelManager):
+    """Generic flow model manager implementing architecture-independent methods (training, etc)"""
 
     def train_model(self, train_mode = "variance_forward", batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
                     logging=True, pretty_progressbar=True, save_best = True,
@@ -406,3 +180,157 @@ class RollingPWlinearNormalizingFlowManager(AM.ModelManager):
             return history
 
 
+class RollingPWlinearNormalizingFlowManager(GenericFlowManager):
+    """A manager for normalizing flows with piecewise linear coupling cells interleaved with rolling layers that
+    apply cyclic permutations on the variables. All cells have the same number of pass through variables and the
+    same step size in the cyclic permutation.
+    Each coupling cell has a fully connected NN with a fixed number of layers (depth) of fixed size (width)
+
+    Hyperparameters:
+    - n_pass_through
+    - n_bins
+    - nn_width
+    - nn_depth
+    - nn_activation
+    - roll_step
+    - l2_reg
+    - dropout_rate
+    - TODO training mode
+    """
+    def __init__(self,
+                 *,
+                 n_flow: int,
+                 n_pass_through_domain = None,
+                 n_cells_domain=(1,10),
+                 n_bins_domain = (2,10),
+                 nn_width_domain = None,
+                 nn_depth_domain = (1,10),
+                 nn_activation_domain = ("relu",),
+                 roll_step_domain = None,
+                 l2_reg_domain = (0.,1.),
+                 dropout_rate_domain = (0.,1.),
+                 batch_size_domain = (100,1000000),
+                 **init_opts
+):
+        """
+
+        Args:
+            n_flow ():
+            n_pass_through_domain ():
+            n_cells_domain ():
+            n_bins_domain ():
+            nn_width_domain ():
+            nn_depth_domain ():
+            nn_activation_domain ():
+            roll_step_domain ():
+            l2_reg_domain ():
+            dropout_rate_domain ():
+            batch_size_domain ():
+            **init_opts ():
+        """
+        self.n_flow = n_flow
+        self._model = None
+        self._inverse_model = None
+
+        # Some domains do not have an explicit default value as we want them to be dependent on other domains
+        if n_pass_through_domain is None:
+            _n_pass_through_domain = [1,n_flow-1]
+        else: _n_pass_through_domain=n_pass_through_domain
+
+        if nn_width_domain is None:
+            _nn_width_domain = [n_bins_domain[0],5*n_bins_domain[1]]
+        else: _nn_width_domain=nn_width_domain
+
+        if roll_step_domain is None:
+            _roll_step_domain = [1,n_flow-1]
+        else: _roll_step_domain=roll_step_domain
+
+        # **Hyperparameters**
+        # Note that we include the number of batch points for training.
+        # This is because we only have an estimator for the loss (which is defined as an integral)
+        # And batch statistics has an impact on convergence
+        # Pedagogical note: a contrario if we divide this sample into N minibatches and accumulate the gradients
+        # before taking an optimizer step (typically for memory reasons)
+
+        self._hparam = {
+            "n_pass_through": hp.HParam("n_pass_through", domain=hp.IntInterval(*_n_pass_through_domain),display_name="# Pass"),
+
+            "n_cells": hp.HParam("n_cells",domain=hp.IntInterval(*n_cells_domain),display_name="# Cells"),
+
+            "n_bins": hp.HParam("n_bins", domain=hp.IntInterval(*n_bins_domain),display_name="# Bins"),
+
+            "nn_width": hp.HParam("nn_width", domain=hp.IntInterval(*_nn_width_domain),display_name="NN width"),
+
+            "nn_depth": hp.HParam("nn_depth", domain=hp.IntInterval(*nn_depth_domain),display_name="NN depth"),
+
+            "nn_activation": hp.HParam("nn_activation", domain=hp.Discrete(nn_activation_domain),display_name="NN activ. fct."),
+
+            "roll_step": hp.HParam("roll_step", domain=hp.IntInterval(*_roll_step_domain),display_name="Roll step"),
+
+            "l2_reg": hp.HParam("l2_reg", domain=hp.RealInterval(*l2_reg_domain),display_name="L2 reg."),
+
+            "dropout_rate": hp.HParam("dropout_rate", domain=hp.RealInterval(*dropout_rate_domain),display_name="Dropout rate"),
+
+            "batch_size": hp.HParam("batch_size", domain=hp.IntInterval(*batch_size_domain),
+                                      display_name="Batch size"),
+
+        }
+
+        self._metrics = {
+            "std": hp.Metric("std", display_name="Integrand standard deviation")
+        }
+
+    format_input = AddJacobian()
+
+    def create_model(self,*,
+                     n_pass_through,
+                     n_cells,
+                     n_bins,
+                     nn_width,
+                     nn_depth,
+                     nn_activation="relu",
+                     roll_step,
+                     l2_reg=0,
+                     dropout_rate=0,
+                     optimizer_object,
+                     **opts
+                     ):
+        """
+
+        Args:
+            n_pass_through ():
+            n_cells ():
+            n_bins ():
+            nn_width ():
+            nn_depth ():
+            nn_activation ():
+            roll_step ():
+            l2_reg ():
+            dropout_rate ():
+            optimizer_object():
+            **opts ():
+
+        Returns:
+
+        """
+
+        self._model = keras.Sequential()
+
+        for i_cell in range(n_cells):
+            nn_layers = [nn_width]*nn_depth
+            self._model.add(
+                PieceWiseLinear(self.n_flow, n_pass_through, n_bins=n_bins, nn_layers=nn_layers,
+                                reg=l2_reg, dropout=dropout_rate)
+            )
+            self._model.add(RollLayer(roll_step))
+
+        self._inverse_model = keras.Sequential([l.inverse for l in reversed(self._model.layers)])
+
+        self.optimizer_object = optimizer_object
+
+        # Do one pass forward:
+        self._model(
+            self.format_input(
+                tf.random.uniform((1,self.n_flow),0.,1.)
+            )
+        )
