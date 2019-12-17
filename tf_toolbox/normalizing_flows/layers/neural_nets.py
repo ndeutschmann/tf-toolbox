@@ -67,7 +67,7 @@ class RectangularResBlock(keras.Model):
     """One dense layer with width W then depth-1 dense layers with width W and a skip connection"""
     def __init__(self, *, width, depth, input_size, output_shape,
                  layer_activation="relu", final_activation="exponential", l2_reg=0., dropout_rate=0.):
-        assert depth > 1, "no point in a resnet with a single dense layer"
+        assert depth > 1, "A resnet needs multiple layers"
         
         super(RectangularResBlock, self).__init__()
         

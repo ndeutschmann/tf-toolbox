@@ -3,7 +3,7 @@ import tensorflow.keras as keras
 import tensorboard.plugins.hparams.api as hp
 from tqdm.autonotebook import tqdm
 from tf_toolbox.training.misc import tqdm_recycled
-from .layers.coupling_cells import PieceWiseLinear
+from .layers.coupling_cells import RectDNN_PieceWiseLinearCoupling
 from .layers.misc import AddJacobian, RollLayer
 
 from ..training.tf_managers.models import StandardModelManager
@@ -325,10 +325,11 @@ class RollingPWlinearNormalizingFlowManager(GenericFlowManager):
         self._model = keras.Sequential()
 
         for i_cell in range(n_cells):
-            nn_layers = [nn_width]*nn_depth
             self._model.add(
-                PieceWiseLinear(self.n_flow, n_pass_through, n_bins=n_bins, nn_layers=nn_layers,
-                                reg=l2_reg, dropout=dropout_rate)
+                RectDNN_PieceWiseLinearCoupling(flow_size=self.n_flow,
+                                                pass_through_size=n_pass_through,
+                                                n_bins=n_bins, width=nn_width,depth=nn_depth,
+                                                reg=l2_reg, dropout=dropout_rate, layer_activation=nn_activation)
             )
             self._model.add(RollLayer(roll_step))
 

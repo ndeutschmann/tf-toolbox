@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow_core.python.keras.api._v2 import keras as keras
+import tensorflow.keras as keras
 
 
 class AddJacobian(keras.layers.Layer):
@@ -28,3 +28,10 @@ class InverseRollLayer(keras.layers.Layer):
 
     def call(self, x):
         return tf.concat((tf.roll(x[:, :-1], -self.shift, axis=-1), x[:, -1:]), axis=-1)
+
+
+class CenterHyperCube(keras.layers.Layer):
+    def __init__(self):
+        super(CenterHyperCube, self).__init__()
+    def call(self,x):
+        return x-0.5

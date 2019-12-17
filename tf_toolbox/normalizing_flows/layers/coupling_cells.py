@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow import keras
-
+from .neural_nets import GenericDNN,RectangularDNN,RectangularResBlock
 
 class AffineCoupling(keras.layers.Layer):
     def __init__(self, flow_size, pass_through_size, NN_layers):
@@ -30,29 +30,22 @@ class AffineCoupling(keras.layers.Layer):
         return tf.concat((xA, yB, tf.expand_dims(jacobian, 1)), axis=1)
 
 
-class PieceWiseLinear(keras.layers.Layer):
-    def __init__(self, flow_size, pass_through_size, n_bins=10, nn_layers=[], reg=0., dropout=0.,
-                 final_activation="exponential"):
-        super(PieceWiseLinear, self).__init__()
+class GeneralPieceWiseLinearCoupling(keras.layers.Layer):
+    """Piecewise linear layer that takes an arbitrary neural network as its transverse
+    leg."""
+    def __init__(self,*, flow_size, pass_through_size, n_bins=10, nn):
+        super(GeneralPieceWiseLinearCoupling, self).__init__()
         self.pass_through_size = pass_through_size
         self.flow_size = flow_size
         self.transform_size = flow_size - pass_through_size
         self.n_bins = n_bins
-        sizes = nn_layers + [(n_bins * self.transform_size)]
-        nn_layers = [keras.layers.Dense(sizes[0], input_shape=(pass_through_size,), activation="relu",
-                                        kernel_regularizer=tf.keras.regularizers.l2(reg))]
-        for size in sizes[1:-1]:
-            nn_layers.append(
-                keras.layers.Dense(size, activation="relu", kernel_regularizer=tf.keras.regularizers.l2(reg)))
-            if dropout > 0:
-                nn_layers.append(keras.layers.Dropout(dropout))
-            nn_layers.append(keras.layers.BatchNormalization())
 
-        nn_layers.append(keras.layers.Dense(sizes[-1], activation=final_activation,
-                                            kernel_regularizer=tf.keras.regularizers.l2(reg)))
-        nn_layers.append(keras.layers.Reshape((self.transform_size, n_bins)))
-        self.NN = keras.Sequential(nn_layers)
-        self.inverse = InversePieceWiseLinear(self)
+        assert nn.input_shape == (None, pass_through_size), "Transverse neural network input shape incorrect"
+        assert nn.output_shape == (None, self.transform_size, self.n_bins), "Transverse neural network output" \
+                                                                            " shape incorrect"
+        self.NN = nn
+
+        self.inverse = InversePieceWiseLinearCoupling(self)
 
     def call(self, x):
         xA = x[:, :self.pass_through_size]
@@ -77,9 +70,9 @@ class PieceWiseLinear(keras.layers.Layer):
         return tf.concat((xA, cdf, jacobian), axis=-1)
 
 
-class InversePieceWiseLinear(keras.layers.Layer):
+class InversePieceWiseLinearCoupling(keras.layers.Layer):
     def __init__(self, forward_layer):
-        super(InversePieceWiseLinear, self).__init__()
+        super(InversePieceWiseLinearCoupling, self).__init__()
         self.pass_through_size = forward_layer.pass_through_size
         self.flow_size = forward_layer.flow_size
         self.transform_size = forward_layer.flow_size - forward_layer.pass_through_size
@@ -102,3 +95,50 @@ class InversePieceWiseLinear(keras.layers.Layer):
         xB = (yB - offsets) / slopes + (tf.squeeze(tf.cast(ybins, tf.float32), axis=-1)) / self.n_bins
         jacobian *= tf.expand_dims(tf.reduce_prod(1 / slopes, axis=-1), axis=-1)
         return tf.concat((yA, xB, jacobian), axis=-1)
+
+
+class DNN_PieceWiseLinearCoupling(GeneralPieceWiseLinearCoupling):
+    def __init__(self, flow_size, pass_through_size, n_bins=10, nn_layers=[], reg=0., dropout=0., layer_activation="relu",
+                 final_activation="exponential"):
+        nn = GenericDNN(layer_widths=nn_layers,
+                        input_size=pass_through_size,
+                        output_shape=(flow_size-pass_through_size,n_bins),
+                        layer_activation=layer_activation,
+                        final_activation=final_activation,
+                        l2_reg=reg,dropout_rate=dropout)
+        
+        super(DNN_PieceWiseLinearCoupling, self).__init__(flow_size=flow_size,
+                                                          pass_through_size=pass_through_size,
+                                                          n_bins=n_bins,
+                                                          nn=nn)
+
+
+class RectDNN_PieceWiseLinearCoupling(GeneralPieceWiseLinearCoupling):
+    def __init__(self,*, flow_size, pass_through_size, n_bins=10, width, depth, reg=0., dropout=0.,
+                 layer_activation="relu", final_activation="exponential"):
+        nn = RectangularDNN(depth=depth,width=width,
+                        input_size=pass_through_size,
+                        output_shape=(flow_size - pass_through_size, n_bins),
+                        layer_activation=layer_activation,
+                        final_activation=final_activation,
+                        l2_reg=reg, dropout_rate=dropout)
+
+        super(RectDNN_PieceWiseLinearCoupling, self).__init__(flow_size=flow_size,
+                                                          pass_through_size=pass_through_size,
+                                                          n_bins=n_bins,
+                                                          nn=nn)
+
+class RectResnet_PieceWiseLinearCoupling(GeneralPieceWiseLinearCoupling):
+    def __init__(self,*, flow_size, pass_through_size, n_bins=10, width, depth, reg=0., dropout=0.,
+                 layer_activation="relu", final_activation="exponential"):
+        nn = RectangularResBlock(depth=depth,width=width,
+                        input_size=pass_through_size,
+                        output_shape=(flow_size - pass_through_size, n_bins),
+                        layer_activation=layer_activation,
+                        final_activation=final_activation,
+                        l2_reg=reg, dropout_rate=dropout)
+
+        super(RectResnet_PieceWiseLinearCoupling, self).__init__(flow_size=flow_size,
+                                                          pass_through_size=pass_through_size,
+                                                          n_bins=n_bins,
+                                                          nn=nn)
