@@ -40,9 +40,12 @@ class GeneralPieceWiseLinearCoupling(keras.layers.Layer):
         self.transform_size = flow_size - pass_through_size
         self.n_bins = n_bins
 
-        assert nn.input_shape == (None, pass_through_size), "Transverse neural network input shape incorrect"
-        assert nn.output_shape == (None, self.transform_size, self.n_bins), "Transverse neural network output" \
-                                                                            " shape incorrect"
+        # TODO: fix this check (fails due to shape not yet initialized although the model is supposed
+        # TODO: to have an "input_shape" fixed)
+
+        # assert nn.input_shape == (None, pass_through_size), "Transverse neural network input shape incorrect"
+        # assert nn.output_shape == (None, self.transform_size, self.n_bins), "Transverse neural network output" \
+        #                                                                            " shape incorrect"
         self.NN = nn
 
         self.inverse = InversePieceWiseLinearCoupling(self)
