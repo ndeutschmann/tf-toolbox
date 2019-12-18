@@ -76,13 +76,32 @@ class ExperimentManager:
 
     @abstractmethod
     def start_model_manager_training(self,**opts):
-        """Experiment-type specific command"""
+        """Experiment-type specific command
+
+        Comment on the API:
+        This is an API-defining function: sub_classes implementing the lower-level `start_model_manager_training`
+        are supposed to implement it all in the same spirit that this low-level method should take all its arguments
+        explicitly from the do_run call in this method
+
+        It is ok to implement a new do_run in a subclass, (see LoggingExperimentManager below, which fills in info from
+        the internal config that is saved) but it should always call super to handle the lower-level call to
+        start_model_manager_training.
+        """
         pass
 
     def do_run(self,**run_opts):
         """Start a training run
         Arguments depend on the specific model/training mode. Look at the signature of self.model_manager.train_model
         for further details.
+
+        Comment on the API:
+        This is an API-defining function: sub_classes implementing the lower-level `start_model_manager_training`
+        are supposed to implement it all in the same spirit that this low-level method should take all its arguments
+        explicitly from the do_run call in this method
+
+        It is ok to implement a new do_run in a subclass, (see LoggingExperimentManager below, which fills in info from
+        the internal config that is saved) but it should always call super to handle the lower-level call to
+        start_model_manager_training.
         """
         if self.run_name is None:
             raise RuntimeError("No run initialized")
@@ -149,12 +168,9 @@ class LoggingExperimentManager(ExperimentManager):
         self.run_opts = None
 
     def start_model_manager_training(self, logger_functions=(), epoch_start=0, *, logdir, hparam, **runtime_options):
-        if self.run_opts is None:
-            raise RuntimeError("Prepare a run before starting it")
-        # TODO runtime options issue, see comment in do_run
+        # TODO runtime options ambiguity issue, see comment in do_run
         return self.model_manager.train_model(epoch_start=self.epoch,
                                               logdir=logdir,
                                               hparam=hparam,
                                               logger_functions=logger_functions,
-                                              **self.run_opts,
                                               **runtime_options)
