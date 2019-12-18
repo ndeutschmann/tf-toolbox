@@ -5,7 +5,8 @@ from numpy import prod
 class GenericDNN(keras.Sequential):
     """A generic dense neural network with a list of layer widths and a specific output shape"""
     def __init__(self, *, layer_widths=[], input_size, output_shape,
-                 layer_activation="relu", final_activation="exponential", l2_reg=0., dropout_rate=0.):
+                 layer_activation="relu", final_activation="exponential",
+                 l2_reg=0., dropout_rate=0., use_batch_norm=True):
 
         all_layer_widths = layer_widths + [prod(output_shape)]
 
@@ -28,6 +29,14 @@ class GenericDNN(keras.Sequential):
                                    kernel_regularizer=keras.regularizers.l2(l2_reg)
                                    )
             )
+            if use_batch_norm:
+                dense_layers.append(
+                    keras.layers.BatchNormalization()
+                )
+            if dropout_rate > 0.:
+                dense_layers.append(
+                    keras.layers.Dropout(dropout_rate)
+                )
 
             for width in all_layer_widths[1:-1]:
                 dense_layers.append(
@@ -35,6 +44,10 @@ class GenericDNN(keras.Sequential):
                                        activation=layer_activation,
                                        kernel_regularizer=keras.regularizers.l2(l2_reg))
                 )
+                if use_batch_norm:
+                    dense_layers.append(
+                        keras.layers.BatchNormalization()
+                    )
                 if dropout_rate>0.:
                     dense_layers.append(
                         keras.layers.Dropout(dropout_rate)
@@ -53,7 +66,8 @@ class GenericDNN(keras.Sequential):
 
 class RectangularDNN(GenericDNN):
     def __init__(self, *, width, depth, input_size, output_shape,
-                 layer_activation="relu", final_activation="exponential", l2_reg=0., dropout_rate=0.):
+                 layer_activation="relu", final_activation="exponential",
+                 l2_reg=0., dropout_rate=0., use_batch_norm=True):
         layer_widths = [width]*depth
         super(RectangularDNN, self).__init__(layer_widths=layer_widths,
                                              input_size=input_size,
@@ -61,12 +75,14 @@ class RectangularDNN(GenericDNN):
                                              layer_activation=layer_activation,
                                              final_activation=final_activation,
                                              l2_reg=l2_reg,
-                                             dropout_rate=dropout_rate)
+                                             dropout_rate=dropout_rate,
+                                             use_batch_norm=use_batch_norm)
 
 class RectangularResBlock(keras.Model):
     """One dense layer with width W then depth-1 dense layers with width W and a skip connection"""
     def __init__(self, *, width, depth, input_size, output_shape,
-                 layer_activation="relu", final_activation="exponential", l2_reg=0., dropout_rate=0.):
+                 layer_activation="relu", final_activation="exponential",
+                 l2_reg=0., dropout_rate=0., use_batch_norm=True):
         assert depth > 1, "A resnet needs multiple layers"
         
         super(RectangularResBlock, self).__init__()
@@ -83,7 +99,8 @@ class RectangularResBlock(keras.Model):
                                        layer_activation=layer_activation,
                                        final_activation=layer_activation,
                                        l2_reg=l2_reg,
-                                       dropout_rate=dropout_rate)
+                                       dropout_rate=dropout_rate,
+                                       use_batch_norm=use_batch_norm)
 
         self.final_layer = RectangularDNN(width=width,
                                           depth=0,
@@ -92,7 +109,8 @@ class RectangularResBlock(keras.Model):
                                           layer_activation=layer_activation,
                                           final_activation=final_activation,
                                           l2_reg=l2_reg,
-                                          dropout_rate=dropout_rate)
+                                          dropout_rate=dropout_rate,
+                                          use_batch_norm=use_batch_norm)
 
     def call(self, inputs):
         x = self.first_layer(inputs)

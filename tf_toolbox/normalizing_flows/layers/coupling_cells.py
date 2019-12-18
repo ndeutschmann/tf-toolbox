@@ -101,14 +101,15 @@ class InversePieceWiseLinearCoupling(keras.layers.Layer):
 
 
 class DNN_PieceWiseLinearCoupling(GeneralPieceWiseLinearCoupling):
-    def __init__(self, flow_size, pass_through_size, n_bins=10, nn_layers=[], reg=0., dropout=0., layer_activation="relu",
-                 final_activation="exponential"):
+    def __init__(self, flow_size, pass_through_size, n_bins=10, nn_layers=[], reg=0., dropout=0.,
+                 layer_activation="relu", final_activation="exponential", use_batch_norm=True):
         nn = GenericDNN(layer_widths=nn_layers,
                         input_size=pass_through_size,
                         output_shape=(flow_size-pass_through_size,n_bins),
                         layer_activation=layer_activation,
                         final_activation=final_activation,
-                        l2_reg=reg,dropout_rate=dropout)
+                        l2_reg=reg,dropout_rate=dropout,
+                        use_batch_norm=use_batch_norm)
         
         super(DNN_PieceWiseLinearCoupling, self).__init__(flow_size=flow_size,
                                                           pass_through_size=pass_through_size,
@@ -118,28 +119,31 @@ class DNN_PieceWiseLinearCoupling(GeneralPieceWiseLinearCoupling):
 
 class RectDNN_PieceWiseLinearCoupling(GeneralPieceWiseLinearCoupling):
     def __init__(self,*, flow_size, pass_through_size, n_bins=10, width, depth, reg=0., dropout=0.,
-                 layer_activation="relu", final_activation="exponential"):
+                 layer_activation="relu", final_activation="exponential", use_batch_norm=True):
         nn = RectangularDNN(depth=depth,width=width,
-                        input_size=pass_through_size,
-                        output_shape=(flow_size - pass_through_size, n_bins),
-                        layer_activation=layer_activation,
-                        final_activation=final_activation,
-                        l2_reg=reg, dropout_rate=dropout)
+                            input_size=pass_through_size,
+                            output_shape=(flow_size - pass_through_size, n_bins),
+                            layer_activation=layer_activation,
+                            final_activation=final_activation,
+                            l2_reg=reg, dropout_rate=dropout,
+                            use_batch_norm=use_batch_norm)
 
         super(RectDNN_PieceWiseLinearCoupling, self).__init__(flow_size=flow_size,
                                                           pass_through_size=pass_through_size,
                                                           n_bins=n_bins,
                                                           nn=nn)
 
+
 class RectResnet_PieceWiseLinearCoupling(GeneralPieceWiseLinearCoupling):
     def __init__(self,*, flow_size, pass_through_size, n_bins=10, width, depth, reg=0., dropout=0.,
-                 layer_activation="relu", final_activation="exponential"):
+                 layer_activation="relu", final_activation="exponential", use_batch_norm=True):
         nn = RectangularResBlock(depth=depth,width=width,
-                        input_size=pass_through_size,
-                        output_shape=(flow_size - pass_through_size, n_bins),
-                        layer_activation=layer_activation,
-                        final_activation=final_activation,
-                        l2_reg=reg, dropout_rate=dropout)
+                                 input_size=pass_through_size,
+                                 output_shape=(flow_size - pass_through_size, n_bins),
+                                 layer_activation=layer_activation,
+                                 final_activation=final_activation,
+                                 l2_reg=reg, dropout_rate=dropout,
+                                 use_batch_norm=use_batch_norm)
 
         super(RectResnet_PieceWiseLinearCoupling, self).__init__(flow_size=flow_size,
                                                           pass_through_size=pass_through_size,
