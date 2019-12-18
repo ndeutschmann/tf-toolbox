@@ -1,6 +1,8 @@
 """Implementation of neural nets for the transverse leg of coupling cells"""
+import tensorflow as tf
 import tensorflow.keras as keras
 from numpy import prod
+
 
 class GenericDNN(keras.Sequential):
     """A generic dense neural network with a list of layer widths and a specific output shape"""
@@ -112,6 +114,7 @@ class RectangularResBlock(keras.Model):
                                           dropout_rate=dropout_rate,
                                           use_batch_norm=use_batch_norm)
 
+    @tf.function
     def call(self, inputs):
         x = self.first_layer(inputs)
         x = self.rect_dnn(x) + x

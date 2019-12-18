@@ -7,6 +7,7 @@ class AddJacobian(keras.layers.Layer):
         super(AddJacobian, self).__init__()
         self.jacobian_value = jacobian_value
 
+    @tf.function
     def call(self, input):
         return tf.concat((input, tf.broadcast_to(self.jacobian_value, (input.shape[0], 1))), axis=1)
 
@@ -17,6 +18,7 @@ class RollLayer(keras.layers.Layer):
         self.shift = shift
         self.inverse = InverseRollLayer(self)
 
+    @tf.function
     def call(self, x):
         return tf.concat((tf.roll(x[:, :-1], self.shift, axis=-1), x[:, -1:]), axis=-1)
 
@@ -26,6 +28,7 @@ class InverseRollLayer(keras.layers.Layer):
         super(InverseRollLayer, self).__init__()
         self.shift = roll_layer.shift
 
+    @tf.function
     def call(self, x):
         return tf.concat((tf.roll(x[:, :-1], -self.shift, axis=-1), x[:, -1:]), axis=-1)
 
@@ -33,5 +36,7 @@ class InverseRollLayer(keras.layers.Layer):
 class CenterHyperCube(keras.layers.Layer):
     def __init__(self):
         super(CenterHyperCube, self).__init__()
+
+    @tf.function
     def call(self,x):
-        return x-0.5
+        return x - 0.5

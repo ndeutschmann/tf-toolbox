@@ -50,6 +50,7 @@ class GeneralPieceWiseLinearCoupling(keras.layers.Layer):
 
         self.inverse = InversePieceWiseLinearCoupling(self)
 
+    @tf.function
     def call(self, x):
         xA = x[:, :self.pass_through_size]
         xB = x[:, self.pass_through_size:self.flow_size]
@@ -82,6 +83,7 @@ class InversePieceWiseLinearCoupling(keras.layers.Layer):
         self.n_bins = forward_layer.n_bins
         self.NN = forward_layer.NN
 
+    @tf.function
     def call(self, y):
         yA = y[:, :self.pass_through_size]
         yB = y[:, self.pass_through_size:self.flow_size]
