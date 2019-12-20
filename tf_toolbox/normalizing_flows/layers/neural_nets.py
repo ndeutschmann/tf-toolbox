@@ -14,6 +14,12 @@ class GenericDNN(keras.Sequential):
 
         dense_layers = []
 
+        # First center the data
+        if use_batch_norm:
+            dense_layers.append(
+                keras.layers.BatchNormalization()
+            )
+
         if len(layer_widths) == 0:
             dense_layers.append(
                 keras.layers.Dense(all_layer_widths[0],
