@@ -139,16 +139,12 @@ class GenericFlowManager(StandardModelManager):
                     )
                     # Separate the points and their Jacobians:
                     # This sample is fixed, we optimize the Jacobian
-                    X = tf.stop_gradient(XJ[:,:-1])
-                    # The Jacobian is the last entry of each point
-                    J = XJ[:,-1]
-                    # Apply function values
-                    fX = f(X)
+                    X = tf.stop_gradient(XJ[:, :-1])
+                    # # Apply function values and combine with the Jacobian (last entry of each X)
+                    fXJ = tf.multiply(f(X), XJ[:, -1])
 
-                    # The Monte Carlo integrand is fX*J: we minimize its variance
-                    loss = tf.math.reduce_variance(fX*J)
-                    std = tf.math.sqrt(tf.stop_gradient(loss))
-                    loss = tf.math.log(loss)
+                    # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
+                    loss = tf.reduce_mean(tf.square(fXJ))
                     # Regularization losses are collected as we move forward in the model
                     loss += sum(self.model.losses)
 
@@ -156,8 +152,8 @@ class GenericFlowManager(StandardModelManager):
                 grads = tape.gradient(loss, self.model.trainable_variables)
                 grads_cumul = [grads[i]+grads_cumul[i] for i in range(len(grads))]
                 loss_cumul += loss
-                std_cumul += std
-            grads_cumul = [g / minibatch_size for g in grads_cumul]
+                std_cumul += tf.math.reduce_std(fXJ)
+            grads_cumul = [g / n_minibatches for g in grads_cumul]
             loss_cumul /= n_minibatches
             std_cumul /= n_minibatches
             optimizer_object.apply_gradients(zip(grads_cumul, self.model.trainable_variables))
