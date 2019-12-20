@@ -3,7 +3,8 @@ import tensorflow.keras as keras
 import tensorboard.plugins.hparams.api as hp
 from tqdm.autonotebook import tqdm
 from tf_toolbox.training.misc import tqdm_recycled
-from .layers import AddJacobian, PieceWiseLinear, RollLayer
+from .layers.coupling_cells import RectDNN_PieceWiseLinearCoupling,RectResnet_PieceWiseLinearCoupling
+from .layers.misc import AddJacobian, RollLayer
 
 from ..training.tf_managers.models import StandardModelManager
 
@@ -26,9 +27,7 @@ class GenericFlowManager(StandardModelManager):
         Args:
             f (): function to train on
             logging (): return loss and accuracy histories?
-            log_tb (): log metrics and hparams into tensorboard (tb)?
             logdir (): where to log tb data
-            hparam (): tb.plugins.hparam.Hparam-keyed dict for hparam logging in tb. TODO add YAML logging w/o tb
             train_mode ():
             batch_size ():
             epochs ():
@@ -36,7 +35,9 @@ class GenericFlowManager(StandardModelManager):
             pretty_progressbar ():
             minibatch_size ():
             save_best():
+            logger_functions():
             **train_opts ():
+
 
         Returns:
             keras.callbacks.History
@@ -138,16 +139,12 @@ class GenericFlowManager(StandardModelManager):
                     )
                     # Separate the points and their Jacobians:
                     # This sample is fixed, we optimize the Jacobian
-                    X = tf.stop_gradient(XJ[:,:-1])
-                    # The Jacobian is the last entry of each point
-                    J = XJ[:,-1]
-                    # Apply function values
-                    fX = f(X)
+                    X = tf.stop_gradient(XJ[:, :-1])
+                    # # Apply function values and combine with the Jacobian (last entry of each X)
+                    fXJ = tf.multiply(f(X), XJ[:, -1])
 
-                    # The Monte Carlo integrand is fX*J: we minimize its variance
-                    loss = tf.math.reduce_variance(fX*J)
-                    std = tf.math.sqrt(tf.stop_gradient(loss))
-                    loss = tf.math.log(loss)
+                    # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
+                    loss = tf.reduce_mean(tf.square(fXJ))
                     # Regularization losses are collected as we move forward in the model
                     loss += sum(self.model.losses)
 
@@ -155,8 +152,8 @@ class GenericFlowManager(StandardModelManager):
                 grads = tape.gradient(loss, self.model.trainable_variables)
                 grads_cumul = [grads[i]+grads_cumul[i] for i in range(len(grads))]
                 loss_cumul += loss
-                std_cumul += std
-            grads_cumul = [g / minibatch_size for g in grads_cumul]
+                std_cumul += tf.math.reduce_std(fXJ)
+            grads_cumul = [g / n_minibatches for g in grads_cumul]
             loss_cumul /= n_minibatches
             std_cumul /= n_minibatches
             optimizer_object.apply_gradients(zip(grads_cumul, self.model.trainable_variables))
@@ -185,7 +182,7 @@ class GenericFlowManager(StandardModelManager):
             return history
 
 
-class RollingPWlinearNormalizingFlowManager(GenericFlowManager):
+class PWLinearRectRollingManager(GenericFlowManager):
     """A manager for normalizing flows with piecewise linear coupling cells interleaved with rolling layers that
     apply cyclic permutations on the variables. All cells have the same number of pass through variables and the
     same step size in the cyclic permutation.
@@ -324,10 +321,66 @@ class RollingPWlinearNormalizingFlowManager(GenericFlowManager):
         self._model = keras.Sequential()
 
         for i_cell in range(n_cells):
-            nn_layers = [nn_width]*nn_depth
             self._model.add(
-                PieceWiseLinear(self.n_flow, n_pass_through, n_bins=n_bins, nn_layers=nn_layers,
-                                reg=l2_reg, dropout=dropout_rate)
+                RectDNN_PieceWiseLinearCoupling(flow_size=self.n_flow,
+                                                pass_through_size=n_pass_through,
+                                                n_bins=n_bins, width=nn_width,depth=nn_depth,
+                                                reg=l2_reg, dropout=dropout_rate, layer_activation=nn_activation)
+            )
+            self._model.add(RollLayer(roll_step))
+
+        self._inverse_model = keras.Sequential([l.inverse for l in reversed(self._model.layers)])
+
+        self.optimizer_object = optimizer_object
+
+        # Do one pass forward:
+        self._model(
+            self.format_input(
+                tf.random.uniform((1,self.n_flow),0.,1.)
+            )
+        )
+
+class PWLinearRectResnetRollingManager(PWLinearRectRollingManager):
+    def create_model(self,*,
+                     n_pass_through,
+                     n_cells,
+                     n_bins,
+                     nn_width,
+                     nn_depth,
+                     nn_activation="relu",
+                     roll_step,
+                     l2_reg=0,
+                     dropout_rate=0,
+                     optimizer_object,
+                     **opts
+                     ):
+        """
+
+        Args:
+            n_pass_through ():
+            n_cells ():
+            n_bins ():
+            nn_width ():
+            nn_depth ():
+            nn_activation ():
+            roll_step ():
+            l2_reg ():
+            dropout_rate ():
+            optimizer_object():
+            **opts ():
+
+        Returns:
+
+        """
+
+        self._model = keras.Sequential()
+
+        for i_cell in range(n_cells):
+            self._model.add(
+                RectResnet_PieceWiseLinearCoupling(flow_size=self.n_flow,
+                                                pass_through_size=n_pass_through,
+                                                n_bins=n_bins, width=nn_width,depth=nn_depth,
+                                                reg=l2_reg, dropout=dropout_rate, layer_activation=nn_activation)
             )
             self._model.add(RollLayer(roll_step))
 

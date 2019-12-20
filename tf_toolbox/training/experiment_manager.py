@@ -76,13 +76,32 @@ class ExperimentManager:
 
     @abstractmethod
     def start_model_manager_training(self,**opts):
-        """Experiment-type specific command"""
+        """Experiment-type specific command
+
+        Comment on the API:
+        This is an API-defining function: sub_classes implementing the lower-level `start_model_manager_training`
+        are supposed to implement it all in the same spirit that this low-level method should take all its arguments
+        explicitly from the do_run call in this method
+
+        It is ok to implement a new do_run in a subclass, (see LoggingExperimentManager below, which fills in info from
+        the internal config that is saved) but it should always call super to handle the lower-level call to
+        start_model_manager_training.
+        """
         pass
 
     def do_run(self,**run_opts):
         """Start a training run
         Arguments depend on the specific model/training mode. Look at the signature of self.model_manager.train_model
         for further details.
+
+        Comment on the API:
+        This is an API-defining function: sub_classes implementing the lower-level `start_model_manager_training`
+        are supposed to implement it all in the same spirit that this low-level method should take all its arguments
+        explicitly from the do_run call in this method
+
+        It is ok to implement a new do_run in a subclass, (see LoggingExperimentManager below, which fills in info from
+        the internal config that is saved) but it should always call super to handle the lower-level call to
+        start_model_manager_training.
         """
         if self.run_name is None:
             raise RuntimeError("No run initialized")
@@ -96,10 +115,10 @@ class ExperimentManager:
         print("Starting run "+self.run_name)
         # The main reason for this class is this line below:
         # build a Hparam-keyed dictionnary for proper logging
-        hparam_values = dict([(self.hp_dict[k],run_opts[k]) for k in self.hp_dict])
-        run_logdir = os.path.join(self.logdir,self.run_name)
+        hparam = dict([(self.hp_dict[k],run_opts[k]) for k in self.hp_dict])
+        logdir = os.path.join(self.logdir,self.run_name)
 
-        result = self.start_model_manager_training(run_logdir=run_logdir,hparam_values=hparam_values,**run_opts)
+        result = self.start_model_manager_training(logdir=logdir, hparam=hparam, epoch_start=self.epoch, **run_opts)
 
         if "epochs" in run_opts:
             self.epoch+=run_opts['epochs']
@@ -110,3 +129,48 @@ class ExperimentManager:
         self.run_id += 1
         self.epoch = 0
         del self.model_manager.model
+
+
+class LoggingExperimentManager(ExperimentManager):
+    """Generic Experiment manager that calls the model manager's `train_model` method with a list of logger functions
+    that will be called on metrics. The logger must have the same signature as tf.summary.scalar
+    """
+    # TODO:
+    # The goal is to make this class a user-facing class whose definition is a main element of the model manager API
+    # Ideally, one would define an abstract ModelManager subclass that has all the abstract methods with the right
+    # signatures to enforce this structure. For now this is essentially enforced by us using only the FlowManager class
+    # which implements one unique training method for all our architectures, making the propagation of changes
+    # manageable even without a clear interface requirement between models and experiements.
+
+    def __init__(self,model_manager:ModelManager,optimizer_manager:OptimizerManager,*,logdir,run_name_template="run"):
+        super(LoggingExperimentManager, self).__init__(model_manager, optimizer_manager, logdir=logdir,
+                                                       run_name_template=run_name_template, log_names=True)
+        self.run_opts = None
+
+    def prepare_run(self, **opts):
+        super(LoggingExperimentManager, self).prepare_run(run_name=None, run_id=None, use_timestamp=True, **opts)
+        self.run_opts = opts
+
+    def do_run(self,**runtime_options):
+        # TODO:
+        # for now the distinction between the options provided in prepare run and runtime_options is purely semantic.
+        # There are no check as to which is which and this is a bad thing.
+        # The goal is to be able to wrap this whole thing in a Sacred experiment, in which one would like to log the
+        # options of prepare_run as a experiment.config while the runtime options are things like data,
+        # which we might not want to log as part of the configuration. For now, the separation is left to the user,
+        # which is of course dangerous.
+        if self.run_opts is None:
+            raise RuntimeError("Prepare a run before starting it")
+        return super(LoggingExperimentManager, self).do_run(**self.run_opts, **runtime_options)
+
+    def end_run(self):
+        super(LoggingExperimentManager, self).end_run()
+        self.run_opts = None
+
+    def start_model_manager_training(self, logger_functions=(), epoch_start=0, *, logdir, hparam, **runtime_options):
+        # TODO runtime options ambiguity issue, see comment in do_run
+        return self.model_manager.train_model(epoch_start=self.epoch,
+                                              logdir=logdir,
+                                              hparam=hparam,
+                                              logger_functions=logger_functions,
+                                              **runtime_options)
