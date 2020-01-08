@@ -164,13 +164,13 @@ class GenericFlowManager(StandardModelManager):
 
             # Log the relevant data for internal use
             if logging:
-                history.on_epoch_end(epoch=i,logs={"loss":loss_cumul.numpy(), "std":std_cumul.numpy()})
+                history.on_epoch_end(epoch=i,logs={"loss":float(loss_cumul), "std":float(std_cumul)})
 
             # Log the data
             # Logger function must take arguments as name,value,step
             for lf in logger_functions:
-                lf('loss', loss_cumul, i)
-                lf('std',  std_cumul,  i)
+                lf('loss', float(loss_cumul), i)
+                lf('std',  float(std_cumul),  i)
 
             if save_best and std_cumul < best_std:
                 best_std = std_cumul
@@ -289,13 +289,13 @@ class GenericFlowManager(StandardModelManager):
 
             # Log the relevant data for internal use
             if logging:
-                history.on_epoch_end(epoch=i,logs={"loss":loss_cumul.numpy(), "std":std_cumul.numpy()})
+                history.on_epoch_end(epoch=i,logs={"loss":float(loss_cumul), "std":float(std_cumul)})
 
             # Log the data
             # Logger function must take arguments as name,value,step
             for lf in logger_functions:
-                lf('loss', loss_cumul, i)
-                lf('std',  std_cumul,  i)
+                lf('loss', float(loss_cumul), i)
+                lf('std',  float(std_cumul),  i)
 
             if save_best and std_cumul < best_std:
                 best_std = std_cumul
