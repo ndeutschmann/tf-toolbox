@@ -3,7 +3,8 @@ import tensorflow.keras as keras
 import tensorboard.plugins.hparams.api as hp
 from tqdm.autonotebook import tqdm
 from tf_toolbox.training.misc import tqdm_recycled
-from .layers import AddJacobian, PieceWiseLinear, RollLayer
+from .layers.coupling_cells import RectDNN_PieceWiseLinearCoupling,RectResnet_PieceWiseLinearCoupling
+from .layers.misc import AddJacobian, RollLayer
 
 from ..training.tf_managers.models import StandardModelManager
 
@@ -11,7 +12,7 @@ from ..training.tf_managers.models import StandardModelManager
 class GenericFlowManager(StandardModelManager):
     """Generic flow model manager implementing architecture-independent methods (training, etc)"""
 
-    def train_model(self, train_mode = "variance_forward", batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
+    def train_model(self, train_mode = "variance_backward_staggered", batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
                     logging=True, pretty_progressbar=True, save_best = True,
                     *, f, logdir, logger_functions, **train_opts):
         """Training method that dispatches the model into the different training modes.
@@ -138,23 +139,144 @@ class GenericFlowManager(StandardModelManager):
                     )
                     # Separate the points and their Jacobians:
                     # This sample is fixed, we optimize the Jacobian
-                    X = tf.stop_gradient(XJ[:,:-1])
-                    # The Jacobian is the last entry of each point
-                    J = XJ[:,-1]
-                    # Apply function values
-                    fX = f(X)
+                    X = tf.stop_gradient(XJ[:, :-1])
+                    # # Apply function values and combine with the Jacobian (last entry of each X)
+                    fXJ = tf.multiply(f(X), XJ[:, -1])
 
-                    # The Monte Carlo integrand is fX*J: we minimize its variance
-                    loss = tf.math.reduce_variance(fX*J)
-                    std = tf.math.sqrt(tf.stop_gradient(loss))
-                    loss = tf.math.log(loss)
+                    # The Monte Carlo integrand is fXJ: we minimize its variance up to the constant term
+                    loss = tf.reduce_mean(tf.square(fXJ))
                     # Regularization losses are collected as we move forward in the model
                     loss += sum(self.model.losses)
 
                 # Compute and apply gradients
                 grads = tape.gradient(loss, self.model.trainable_variables)
-                grads_cumul = [grads[i]+grads_cumul[i] for i in range(len(grads))]
+                grads_cumul = [grads[k]+grads_cumul[k] for k in range(len(grads))]
                 loss_cumul += loss
+                std_cumul += tf.math.reduce_std(fXJ)
+            grads_cumul = [g / n_minibatches for g in grads_cumul]
+            loss_cumul /= n_minibatches
+            std_cumul /= n_minibatches
+            optimizer_object.apply_gradients(zip(grads_cumul, self.model.trainable_variables))
+
+            # Update the progress bar
+            if pretty_progressbar:
+                epoch_progress.set_description("Loss: {0:.3e} | Epoch".format(loss_cumul))
+
+            # Log the relevant data for internal use
+            if logging:
+                history.on_epoch_end(epoch=i,logs={"loss":float(loss_cumul), "std":float(std_cumul)})
+
+            # Log the data
+            # Logger function must take arguments as name,value,step
+            for lf in logger_functions:
+                lf('loss', float(loss_cumul), i)
+                lf('std',  float(std_cumul),  i)
+
+            if save_best and std_cumul < best_std:
+                best_std = std_cumul
+                self.save_weights(logdir=logdir,prefix="best")
+
+        if isinstance(minibatch_progress,tqdm_recycled):
+            minibatch_progress.really_close()
+        if logging:
+            return history
+
+    def _train_variance_backward_staggered(self, f, batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
+                                logging=True, pretty_progressbar=True, save_best=True,
+                                *, optimizer_object, logdir, logger_functions, **train_opts):
+        """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
+        (fixed latent space sample mapped to a phase space sample)
+        See notes equation TODO
+
+        Args:
+            f ():
+            batch_size ():
+            minibatch_size():
+            epochs ():
+            epoch_start ():
+            logging ():
+            log_tb ():
+            pretty_progressbar ():
+            optimizer_object ():
+            save_best ():
+            logdir ():
+            **train_opts ():
+
+        Returns:
+
+        """
+
+        # Minibatch logic
+        assert minibatch_size<=batch_size, "The minibatch size must be smaller than the batch size"
+        n_minibatches = int(batch_size/minibatch_size)
+
+        # Instantiate a pretty progress bar if needed
+        if pretty_progressbar:
+            epoch_progress = tqdm(range(epoch_start,epoch_start+epochs), leave=False, desc="Loss: {0:.3e} | Epoch".format(0.))
+            # Instantiate a pretty progress bar for the minibatch loop if it is not trivial
+            if n_minibatches>1:
+                minibatch_progress = tqdm_recycled(range(n_minibatches), leave=False, desc="Step")
+            else:
+                minibatch_progress = range(n_minibatches)
+
+        else:
+            epoch_progress = range(epoch_start, epoch_start+epochs)
+            minibatch_progress = range(n_minibatches)
+
+        # Keep track of metric history if needed
+        if logging:
+            history = keras.callbacks.History()
+            history.on_train_begin()
+
+        # Run the model once
+        XJ = self.model(  # Pass through the model
+            self.format_input(  # Append a unit Jacobian to each point
+                tf.random.uniform((minibatch_size, self.n_flow), 0, 1)  # Generate a batch of points in latent space
+            )
+        )
+        # Initialize tracking for checkpoints
+        if save_best:
+            fX = f(XJ[:,:-1])
+            J = XJ[:,-1]
+            best_std = tf.math.reduce_std(fX*J)
+
+        self.model.build((minibatch_size, self.n_flow+1))
+        variables = self.model.trainable_variables
+
+        #TMP
+        n_renew = 10
+
+        # Loop over epochs
+        for i in epoch_progress:
+            grads_cumul = [tf.zeros_like(variable) for variable in variables]
+            loss_cumul = 0
+            std_cumul = 0
+            # Every n_renew, refresh our data batch
+            if i%n_renew == 0:
+                print("regenerating a new sample")
+                XJ = tf.stop_gradient(self.model(  # Pass through the model
+                    self.format_input(  # Append a unit Jacobian to each point
+                        tf.random.uniform((batch_size, self.n_flow), 0, 1)
+                        # Generate a batch of points in latent space
+                    )
+                ))
+                X = XJ[:, :-1]
+                # Apply function values and multiply by jacobian
+                fX=f(X)
+                fXJp = tf.stop_gradient(tf.multiply(fX,XJ[:, -1]))
+                fXs = tf.split(fX,n_minibatches)
+                Xs = tf.stop_gradient(tf.split(X,n_minibatches))
+                fXJps = tf.split(fXJp,n_minibatches)
+            for j in minibatch_progress:
+                with tf.GradientTape() as tape:
+                    Jinv = self._inverse_model(self.format_input(Xs[j]))[:,-1]
+                    loss=tf.math.reduce_mean((fXJps[j]/Jinv)**2)
+
+                # Compute and apply gradients
+                grads = tape.gradient(loss, self.model.trainable_variables)
+                grads_cumul = [grads[k]+grads_cumul[k] for k in range(len(grads))]
+                loss_cumul += loss
+                std = tf.math.reduce_std(tf.divide(fXs[j],Jinv))
                 std_cumul += std
             grads_cumul = [g / minibatch_size for g in grads_cumul]
             loss_cumul /= n_minibatches
@@ -167,13 +289,13 @@ class GenericFlowManager(StandardModelManager):
 
             # Log the relevant data for internal use
             if logging:
-                history.on_epoch_end(epoch=i,logs={"loss":loss_cumul.numpy(), "std":std_cumul.numpy()})
+                history.on_epoch_end(epoch=i,logs={"loss":float(loss_cumul), "std":float(std_cumul)})
 
             # Log the data
             # Logger function must take arguments as name,value,step
             for lf in logger_functions:
-                lf('loss', loss_cumul, i)
-                lf('std',  std_cumul,  i)
+                lf('loss', float(loss_cumul), i)
+                lf('std',  float(std_cumul),  i)
 
             if save_best and std_cumul < best_std:
                 best_std = std_cumul
@@ -185,7 +307,7 @@ class GenericFlowManager(StandardModelManager):
             return history
 
 
-class RollingPWlinearNormalizingFlowManager(GenericFlowManager):
+class PWLinearRectRollingManager(GenericFlowManager):
     """A manager for normalizing flows with piecewise linear coupling cells interleaved with rolling layers that
     apply cyclic permutations on the variables. All cells have the same number of pass through variables and the
     same step size in the cyclic permutation.
@@ -324,10 +446,66 @@ class RollingPWlinearNormalizingFlowManager(GenericFlowManager):
         self._model = keras.Sequential()
 
         for i_cell in range(n_cells):
-            nn_layers = [nn_width]*nn_depth
             self._model.add(
-                PieceWiseLinear(self.n_flow, n_pass_through, n_bins=n_bins, nn_layers=nn_layers,
-                                reg=l2_reg, dropout=dropout_rate)
+                RectDNN_PieceWiseLinearCoupling(flow_size=self.n_flow,
+                                                pass_through_size=n_pass_through,
+                                                n_bins=n_bins, width=nn_width,depth=nn_depth,
+                                                reg=l2_reg, dropout=dropout_rate, layer_activation=nn_activation)
+            )
+            self._model.add(RollLayer(roll_step))
+
+        self._inverse_model = keras.Sequential([l.inverse for l in reversed(self._model.layers)])
+
+        self.optimizer_object = optimizer_object
+
+        # Do one pass forward:
+        self._model(
+            self.format_input(
+                tf.random.uniform((1,self.n_flow),0.,1.)
+            )
+        )
+
+class PWLinearRectResnetRollingManager(PWLinearRectRollingManager):
+    def create_model(self,*,
+                     n_pass_through,
+                     n_cells,
+                     n_bins,
+                     nn_width,
+                     nn_depth,
+                     nn_activation="relu",
+                     roll_step,
+                     l2_reg=0,
+                     dropout_rate=0,
+                     optimizer_object,
+                     **opts
+                     ):
+        """
+
+        Args:
+            n_pass_through ():
+            n_cells ():
+            n_bins ():
+            nn_width ():
+            nn_depth ():
+            nn_activation ():
+            roll_step ():
+            l2_reg ():
+            dropout_rate ():
+            optimizer_object():
+            **opts ():
+
+        Returns:
+
+        """
+
+        self._model = keras.Sequential()
+
+        for i_cell in range(n_cells):
+            self._model.add(
+                RectResnet_PieceWiseLinearCoupling(flow_size=self.n_flow,
+                                                pass_through_size=n_pass_through,
+                                                n_bins=n_bins, width=nn_width,depth=nn_depth,
+                                                reg=l2_reg, dropout=dropout_rate, layer_activation=nn_activation)
             )
             self._model.add(RollLayer(roll_step))
 
