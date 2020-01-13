@@ -1,7 +1,7 @@
 import os
-from tensorboard.plugins.hparams import api as hp
 from sacred import Experiment
 from ..experiment_manager import LoggingExperimentManager
+from ..abstract_managers import ModelManager,OptimizerManager
 
 # TODO:
 # We want to provide several levels of abstraction.
@@ -14,6 +14,7 @@ from ..experiment_manager import LoggingExperimentManager
 #   - handling observer setting through the experiment manager to make all logging properly organized
 #   - ensure consistent definition of the model yaml and hd5 info as artifacts
 #   - other stuff
+# DONE in BasicSacredExperiment
 #
 # Level two: fully inclusive package:
 #   - treat the sacred experiment as an attribute
@@ -28,10 +29,6 @@ class BasicSacredExperiment(LoggingExperimentManager):
         assert hasattr(self.model_manager,"save_hparams")
         self.model_manager.save_hparams(hparam=hparam, logdir=logdir,prefix="")
 
-        # TODO:
-        # For now the call to the training function of LoggingExperimentManager is quite superfluous.
-        # However the idea is to have LoggingExperimentManager specify one of the user-facing API with detailed
-        # specifications on requirements.
         history = super(BasicSacredExperiment, self).\
             start_model_manager_training(logdir=logdir,
                                          hparam=hparam,
@@ -43,6 +40,15 @@ class BasicSacredExperiment(LoggingExperimentManager):
             run.add_artifact(os.path.join(logdir, "model_info", "best", "weights.h5"))
         return history.history[score_metric][-1]
 
-class SacredExperiment(LoggingExperimentManager):
+class SacredExperiment(BasicSacredExperiment):
     """TODO"""
-    pass
+    def __init__(self,model_manager:ModelManager,optimizer_manager:OptimizerManager,*,logdir,experiment:Experiment):
+        super(SacredExperiment, self).__init__(model_manager,
+                                               optimizer_manager,
+                                               logdir=logdir,
+                                               run_name_template=experiment.get_experiment_info()['name'])
+        self.sacred_exp = experiment
+
+    def prepare_run(self, **opts):
+        super(SacredExperiment, self).prepare_run(**opts)
+        self.sacred_exp.add_config(opts)
