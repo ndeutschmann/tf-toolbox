@@ -350,23 +350,23 @@ class GenericFlowManager(StandardModelManager):
                         # Generate a batch of points in latent space
                     )
                 ))
-                X = XJ[:, :-1]
                 # Apply function values and multiply by jacobian
-                fX=f(X)
-                fXJp = tf.stop_gradient(tf.multiply(fX,XJ[:, -1]))
+                fX = f(XJ[:, :-1])
                 fXs = tf.split(fX,n_minibatches)
-                Xs = tf.stop_gradient(tf.split(X,n_minibatches))
-                fXJps = tf.split(fXJp,n_minibatches)
+                Xs = tf.stop_gradient(tf.split(XJ[:, :-1], n_minibatches))
+                Js = tf.stop_gradient(tf.split(XJ[:, -1], n_minibatches))
+                fX2Js = tf.split(XJ[:, -1]*fX**2,n_minibatches)
+
             for j in minibatch_progress:
                 with tf.GradientTape() as tape:
                     Jinv = self._inverse_model(self.format_input(Xs[j]))[:,-1]
-                    loss=tf.math.reduce_mean((fXJps[j]/Jinv)**2)
+                    loss=tf.math.reduce_mean((fX2Js[j]/Jinv))
 
                 # Compute and apply gradients
                 grads = tape.gradient(loss, self.model.trainable_variables)
                 grads_cumul = [grads[k]+grads_cumul[k] for k in range(len(grads))]
                 loss_cumul += loss
-                std = tf.math.reduce_std(tf.divide(fXs[j],Jinv))
+                std = tf.sqrt(loss-tf.math.reduce_mean((fXs[j]*Js[j]))**2)
                 std_cumul += std
             grads_cumul = [g / minibatch_size for g in grads_cumul]
             loss_cumul /= n_minibatches
