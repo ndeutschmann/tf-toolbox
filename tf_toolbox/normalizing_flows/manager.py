@@ -1,6 +1,6 @@
 import tensorflow as tf
 import tensorflow.keras as keras
-import tensorboard.plugins.hparams.api as hp
+from tensorboard.plugins.hparams import api as hp
 from tqdm.autonotebook import tqdm
 from tf_toolbox.training.misc import tqdm_recycled
 from .layers.coupling_cells import RectDNN_PieceWiseLinearCoupling,RectResnet_PieceWiseLinearCoupling
@@ -11,6 +11,91 @@ from ..training.tf_managers.models import StandardModelManager
 
 class GenericFlowManager(StandardModelManager):
     """Generic flow model manager implementing architecture-independent methods (training, etc)"""
+
+    def __init__(self,
+                 *,
+                 n_flow: int,
+                 n_pass_through_domain = None,
+                 n_cells_domain=(1,10),
+                 n_bins_domain = (2,10),
+                 nn_width_domain = None,
+                 nn_depth_domain = (1,10),
+                 nn_activation_domain = ("relu",),
+                 roll_step_domain = None,
+                 l2_reg_domain = (0.,1.),
+                 dropout_rate_domain = (0.,1.),
+                 batch_size_domain = (100,1000000),
+                 **init_opts
+):
+        """
+
+        Args:
+            n_flow ():
+            n_pass_through_domain ():
+            n_cells_domain ():
+            n_bins_domain ():
+            nn_width_domain ():
+            nn_depth_domain ():
+            nn_activation_domain ():
+            roll_step_domain ():
+            l2_reg_domain ():
+            dropout_rate_domain ():
+            batch_size_domain ():
+            **init_opts ():
+        """
+        self.n_flow = n_flow
+        self._model = None
+        self._inverse_model = None
+
+        # Some domains do not have an explicit default value as we want them to be dependent on other domains
+        if n_pass_through_domain is None:
+            _n_pass_through_domain = [1,n_flow-1]
+        else: _n_pass_through_domain=n_pass_through_domain
+
+        if nn_width_domain is None:
+            _nn_width_domain = [n_bins_domain[0],5*n_bins_domain[1]]
+        else: _nn_width_domain=nn_width_domain
+
+        if roll_step_domain is None:
+            _roll_step_domain = [1,n_flow-1]
+        else: _roll_step_domain=roll_step_domain
+
+        # **Hyperparameters**
+        # Note that we include the number of batch points for training.
+        # This is because we only have an estimator for the loss (which is defined as an integral)
+        # And batch statistics has an impact on convergence
+        # Pedagogical note: a contrario if we divide this sample into N minibatches and accumulate the gradients
+        # before taking an optimizer step (typically for memory reasons)
+
+        self._hparam = {
+            "n_pass_through": hp.HParam("n_pass_through", domain=hp.IntInterval(*_n_pass_through_domain),display_name="# Pass"),
+
+            "n_cells": hp.HParam("n_cells",domain=hp.IntInterval(*n_cells_domain),display_name="# Cells"),
+
+            "n_bins": hp.HParam("n_bins", domain=hp.IntInterval(*n_bins_domain),display_name="# Bins"),
+
+            "nn_width": hp.HParam("nn_width", domain=hp.IntInterval(*_nn_width_domain),display_name="NN width"),
+
+            "nn_depth": hp.HParam("nn_depth", domain=hp.IntInterval(*nn_depth_domain),display_name="NN depth"),
+
+            "nn_activation": hp.HParam("nn_activation", domain=hp.Discrete(nn_activation_domain),display_name="NN activ. fct."),
+
+            "roll_step": hp.HParam("roll_step", domain=hp.IntInterval(*_roll_step_domain),display_name="Roll step"),
+
+            "l2_reg": hp.HParam("l2_reg", domain=hp.RealInterval(*l2_reg_domain),display_name="L2 reg."),
+
+            "dropout_rate": hp.HParam("dropout_rate", domain=hp.RealInterval(*dropout_rate_domain),display_name="Dropout rate"),
+
+            "batch_size": hp.HParam("batch_size", domain=hp.IntInterval(*batch_size_domain),
+                                      display_name="Batch size"),
+
+        }
+
+        self._metrics = {
+            "std": hp.Metric("std", display_name="Integrand standard deviation")
+        }
+
+        self.optimizer_object = None
 
     def train_model(self, train_mode = "variance_backward_staggered", batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
                     logging=True, pretty_progressbar=True, save_best = True,
@@ -243,8 +328,13 @@ class GenericFlowManager(StandardModelManager):
         self.model.build((minibatch_size, self.n_flow+1))
         variables = self.model.trainable_variables
 
-        #TMP
-        n_renew = 10
+        # TODO: temporarily hardcoded
+        # Short term plan: refactor these managers to have one class for each training method
+        # This can then be a hyperparameter of the staggered class
+        # Long term plan: separate the training from the model manager and attach it at creation like the optimizer
+        # -> a HP of the model manager is then the training mode
+        # n_renew will be a HP of the separate training mode / training manager
+        n_renew = 50
 
         # Loop over epochs
         for i in epoch_progress:
@@ -289,7 +379,7 @@ class GenericFlowManager(StandardModelManager):
 
             # Log the relevant data for internal use
             if logging:
-                history.on_epoch_end(epoch=i,logs={"loss":float(loss_cumul), "std":float(std_cumul)})
+                history.on_epoch_end(epoch=i,logs={"loss":float(loss_cumul.numpy()), "std":float(std_cumul.numpy())})
 
             # Log the data
             # Logger function must take arguments as name,value,step
@@ -324,90 +414,6 @@ class PWLinearRectRollingManager(GenericFlowManager):
     - dropout_rate
     - TODO training mode
     """
-    def __init__(self,
-                 *,
-                 n_flow: int,
-                 n_pass_through_domain = None,
-                 n_cells_domain=(1,10),
-                 n_bins_domain = (2,10),
-                 nn_width_domain = None,
-                 nn_depth_domain = (1,10),
-                 nn_activation_domain = ("relu",),
-                 roll_step_domain = None,
-                 l2_reg_domain = (0.,1.),
-                 dropout_rate_domain = (0.,1.),
-                 batch_size_domain = (100,1000000),
-                 **init_opts
-):
-        """
-
-        Args:
-            n_flow ():
-            n_pass_through_domain ():
-            n_cells_domain ():
-            n_bins_domain ():
-            nn_width_domain ():
-            nn_depth_domain ():
-            nn_activation_domain ():
-            roll_step_domain ():
-            l2_reg_domain ():
-            dropout_rate_domain ():
-            batch_size_domain ():
-            **init_opts ():
-        """
-        self.n_flow = n_flow
-        self._model = None
-        self._inverse_model = None
-
-        # Some domains do not have an explicit default value as we want them to be dependent on other domains
-        if n_pass_through_domain is None:
-            _n_pass_through_domain = [1,n_flow-1]
-        else: _n_pass_through_domain=n_pass_through_domain
-
-        if nn_width_domain is None:
-            _nn_width_domain = [n_bins_domain[0],5*n_bins_domain[1]]
-        else: _nn_width_domain=nn_width_domain
-
-        if roll_step_domain is None:
-            _roll_step_domain = [1,n_flow-1]
-        else: _roll_step_domain=roll_step_domain
-
-        # **Hyperparameters**
-        # Note that we include the number of batch points for training.
-        # This is because we only have an estimator for the loss (which is defined as an integral)
-        # And batch statistics has an impact on convergence
-        # Pedagogical note: a contrario if we divide this sample into N minibatches and accumulate the gradients
-        # before taking an optimizer step (typically for memory reasons)
-
-        self._hparam = {
-            "n_pass_through": hp.HParam("n_pass_through", domain=hp.IntInterval(*_n_pass_through_domain),display_name="# Pass"),
-
-            "n_cells": hp.HParam("n_cells",domain=hp.IntInterval(*n_cells_domain),display_name="# Cells"),
-
-            "n_bins": hp.HParam("n_bins", domain=hp.IntInterval(*n_bins_domain),display_name="# Bins"),
-
-            "nn_width": hp.HParam("nn_width", domain=hp.IntInterval(*_nn_width_domain),display_name="NN width"),
-
-            "nn_depth": hp.HParam("nn_depth", domain=hp.IntInterval(*nn_depth_domain),display_name="NN depth"),
-
-            "nn_activation": hp.HParam("nn_activation", domain=hp.Discrete(nn_activation_domain),display_name="NN activ. fct."),
-
-            "roll_step": hp.HParam("roll_step", domain=hp.IntInterval(*_roll_step_domain),display_name="Roll step"),
-
-            "l2_reg": hp.HParam("l2_reg", domain=hp.RealInterval(*l2_reg_domain),display_name="L2 reg."),
-
-            "dropout_rate": hp.HParam("dropout_rate", domain=hp.RealInterval(*dropout_rate_domain),display_name="Dropout rate"),
-
-            "batch_size": hp.HParam("batch_size", domain=hp.IntInterval(*batch_size_domain),
-                                      display_name="Batch size"),
-
-        }
-
-        self._metrics = {
-            "std": hp.Metric("std", display_name="Integrand standard deviation")
-        }
-
-        self.optimizer_object = None
 
     format_input = AddJacobian()
 
