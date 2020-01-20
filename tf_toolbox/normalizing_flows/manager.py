@@ -268,7 +268,7 @@ class GenericFlowManager(StandardModelManager):
 
     def _train_variance_backward_staggered(self, f, batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
                                            n_epochs_before_refresh=50,logging=True, pretty_progressbar=True,
-                                           save_best=True,
+                                           save_best=True, early_stopping=True,
                                            *, optimizer_object, logdir, logger_functions, **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
@@ -337,6 +337,11 @@ class GenericFlowManager(StandardModelManager):
         # n_renew will be a HP of the separate training mode / training manager
         n_renew = n_epochs_before_refresh
 
+        # Early stopping: finish training if five subsequent steps see the loss increasing
+        if early_stopping:
+            n_steps_with_increase = 0
+
+
         # Loop over epochs
         for i in epoch_progress:
             grads_cumul = [tf.zeros_like(variable) for variable in variables]
@@ -388,9 +393,17 @@ class GenericFlowManager(StandardModelManager):
                 lf('loss', float(loss_cumul), i)
                 lf('std',  float(std_cumul),  i)
 
-            if save_best and std_cumul < best_std:
+            if std_cumul < best_std:
+                if save_best:
+                    self.save_weights(logdir=logdir, prefix="best")
+                if early_stopping:
+                    n_steps_with_increase=0
                 best_std = std_cumul
-                self.save_weights(logdir=logdir,prefix="best")
+            elif early_stopping:
+                n_steps_with_increase+=1
+                if n_steps_with_increase >5:
+                    print("The model stopped converging, early stopping")
+                    break
 
         if isinstance(minibatch_progress,tqdm_recycled):
             minibatch_progress.really_close()
