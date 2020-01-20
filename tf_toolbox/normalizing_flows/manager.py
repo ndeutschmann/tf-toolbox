@@ -267,8 +267,9 @@ class GenericFlowManager(StandardModelManager):
             return history
 
     def _train_variance_backward_staggered(self, f, batch_size = 10000, minibatch_size=10000, epochs=10, epoch_start=0,
-                                logging=True, pretty_progressbar=True, save_best=True,
-                                *, optimizer_object, logdir, logger_functions, **train_opts):
+                                           n_epochs_before_refresh=50,logging=True, pretty_progressbar=True,
+                                           save_best=True,
+                                           *, optimizer_object, logdir, logger_functions, **train_opts):
         """Train the model using the integrand variance as loss and compute the Jacobian in the forward pass
         (fixed latent space sample mapped to a phase space sample)
         See notes equation TODO
@@ -328,13 +329,13 @@ class GenericFlowManager(StandardModelManager):
         self.model.build((minibatch_size, self.n_flow+1))
         variables = self.model.trainable_variables
 
-        # TODO: temporarily hardcoded
+        # TODO: Set this parameter as an "official" hyperparameter
         # Short term plan: refactor these managers to have one class for each training method
         # This can then be a hyperparameter of the staggered class
         # Long term plan: separate the training from the model manager and attach it at creation like the optimizer
         # -> a HP of the model manager is then the training mode
         # n_renew will be a HP of the separate training mode / training manager
-        n_renew = 50
+        n_renew = n_epochs_before_refresh
 
         # Loop over epochs
         for i in epoch_progress:
