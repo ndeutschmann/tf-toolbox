@@ -340,11 +340,16 @@ class GenericFlowManager(StandardModelManager):
         # Early stopping: finish training if five subsequent steps see the loss increasing
         if early_stopping:
             n_steps_with_increase = 0
-
+        # Now we just initialize the loss
+        loss_cumul = 0
 
         # Loop over epochs
         for i in epoch_progress:
             grads_cumul = [tf.zeros_like(variable) for variable in variables]
+
+            if early_stopping:
+                old_loss = loss_cumul
+
             loss_cumul = 0
             std_cumul = 0
             # Every n_renew, refresh our data batch
@@ -393,16 +398,19 @@ class GenericFlowManager(StandardModelManager):
                 lf('loss', float(loss_cumul), i)
                 lf('std',  float(std_cumul),  i)
 
-            if std_cumul < best_std:
-                if save_best:
-                    self.save_weights(logdir=logdir, prefix="best")
-                if early_stopping:
-                    n_steps_with_increase=0
+            if std_cumul < best_std and save_best:
+                self.save_weights(logdir=logdir, prefix="best")
                 best_std = std_cumul
-            elif early_stopping:
-                n_steps_with_increase+=1
-                if n_steps_with_increase >5:
-                    print("The model stopped converging, early stopping")
+
+            # Early stopping logic
+            if early_stopping:
+                # Check if the loss is going down
+                if loss_cumul > old_loss:
+                    n_steps_with_increase+=1
+                else:
+                    n_steps_with_increase=0
+                # If the loss has been going up, stop training
+                if n_steps_with_increase>5:
                     break
 
         if isinstance(minibatch_progress,tqdm_recycled):
