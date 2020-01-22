@@ -89,6 +89,7 @@ class GenericFlowManager(StandardModelManager):
             "batch_size": hp.HParam("batch_size", domain=hp.IntInterval(*batch_size_domain),
                                       display_name="Batch size"),
 
+            "use_batch_norm": hp.HParam("use_batch_norm", domain=hp.Discrete([True,False]),display_name="BatchNorm")
         }
 
         self._metrics = {
@@ -449,6 +450,7 @@ class PWLinearRectRollingManager(GenericFlowManager):
                      roll_step,
                      l2_reg=0,
                      dropout_rate=0,
+                     use_batch_norm=True, # Not set as an 'official' hyperparam TODO
                      optimizer_object,
                      **opts
                      ):
@@ -478,7 +480,8 @@ class PWLinearRectRollingManager(GenericFlowManager):
                 RectDNN_PieceWiseLinearCoupling(flow_size=self.n_flow,
                                                 pass_through_size=n_pass_through,
                                                 n_bins=n_bins, width=nn_width,depth=nn_depth,
-                                                reg=l2_reg, dropout=dropout_rate, layer_activation=nn_activation)
+                                                reg=l2_reg, dropout=dropout_rate, layer_activation=nn_activation,
+                                                use_batch_norm=use_batch_norm)
             )
             self._model.add(RollLayer(roll_step))
 
@@ -504,6 +507,7 @@ class PWLinearRectResnetRollingManager(PWLinearRectRollingManager):
                      roll_step,
                      l2_reg=0,
                      dropout_rate=0,
+                     use_batch_norm=True,
                      optimizer_object,
                      **opts
                      ):
@@ -531,9 +535,10 @@ class PWLinearRectResnetRollingManager(PWLinearRectRollingManager):
         for i_cell in range(n_cells):
             self._model.add(
                 RectResnet_PieceWiseLinearCoupling(flow_size=self.n_flow,
-                                                pass_through_size=n_pass_through,
-                                                n_bins=n_bins, width=nn_width,depth=nn_depth,
-                                                reg=l2_reg, dropout=dropout_rate, layer_activation=nn_activation)
+                                                   pass_through_size=n_pass_through,
+                                                   n_bins=n_bins, width=nn_width,depth=nn_depth,
+                                                   reg=l2_reg, dropout=dropout_rate, layer_activation=nn_activation,
+                                                   use_batch_norm=use_batch_norm)
             )
             self._model.add(RollLayer(roll_step))
 
